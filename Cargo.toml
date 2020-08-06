@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "fsd-converter",
+    "neox-tools",
+]

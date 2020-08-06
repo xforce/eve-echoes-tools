@@ -1,0 +1,18 @@
+[package]
+name = "fsd-converter"
+version = "0.1.0"
+authors = ["Alexander Guettler <alexander@guettler.io>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "3.0.0-beta.1"
+serde = "1.0"
+serde-pickle = "0.6"
+bytesize = "1.0"
+byteorder = "1"
+log = "0.4"
+simple_logger = "1.6"
+serde_json = "1"
+lazy_static = "1.4.0"

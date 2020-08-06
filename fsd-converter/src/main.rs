@@ -332,8 +332,6 @@ fn object_from_buffer(
         for (k, v) in offsetAttributes.iter().zip(offsetTable.iter()) {
             offset_attributes_lookup_table.insert(k.clone(), *v);
         }
-
-        println!("No SIZE!");
     }
 
     let attributes = schema["attributes"].as_object().unwrap();
@@ -352,12 +350,6 @@ fn object_from_buffer(
                     output[k] = attribute_schema["default"].clone();
                 }
             } else {
-                println!(
-                    "Load {} at {} {}",
-                    k,
-                    variable_data_offset_base,
-                    variable_data_offset_base + offset_attributes_lookup_table[k] as u64
-                );
                 output[k] = parse_value_from_buffer(
                     &mut buffer,
                     variable_data_offset_base + offset_attributes_lookup_table[k] as u64,
@@ -443,6 +435,161 @@ fn list_from_buffer(
     }
 }
 
+fn vec4_from_buffer(
+    mut buffer: &mut std::io::Cursor<&Vec<u8>>,
+    offset: u64,
+    schema: &serde_json::Value,
+) -> serde_json::Value {
+    buffer.seek(std::io::SeekFrom::Start(offset));
+    let aliases = schema.get("aliases");
+
+    let data: serde_json::Value = if schema
+        .get("precision")
+        .map(|x| x.as_str().unwrap_or("single"))
+        .unwrap_or("single")
+        == "double"
+    {
+        [
+            buffer.read_f64::<LittleEndian>().unwrap(),
+            buffer.read_f64::<LittleEndian>().unwrap(),
+            buffer.read_f64::<LittleEndian>().unwrap(),
+            buffer.read_f64::<LittleEndian>().unwrap(),
+        ]
+        .to_vec()
+        .into()
+    } else {
+        [
+            buffer.read_f32::<LittleEndian>().unwrap(),
+            buffer.read_f32::<LittleEndian>().unwrap(),
+            buffer.read_f32::<LittleEndian>().unwrap(),
+            buffer.read_f32::<LittleEndian>().unwrap(),
+        ]
+        .to_vec()
+        .into()
+    };
+    match aliases {
+        Some(aliases) => {
+            let mut out_data = serde_json::Value::Null;
+            let aliases = aliases.as_object().unwrap();
+            for (k, v) in aliases.iter() {
+                out_data[k] = data[v.as_u64().unwrap() as usize].clone();
+            }
+            out_data
+        }
+        None => data,
+    }
+}
+
+fn vec3_from_buffer(
+    mut buffer: &mut std::io::Cursor<&Vec<u8>>,
+    offset: u64,
+    schema: &serde_json::Value,
+) -> serde_json::Value {
+    buffer.seek(std::io::SeekFrom::Start(offset));
+    let aliases = schema.get("aliases");
+
+    let data: serde_json::Value = if schema
+        .get("precision")
+        .map(|x| x.as_str().unwrap_or("single"))
+        .unwrap_or("single")
+        == "double"
+    {
+        [
+            buffer.read_f64::<LittleEndian>().unwrap(),
+            buffer.read_f64::<LittleEndian>().unwrap(),
+            buffer.read_f64::<LittleEndian>().unwrap(),
+        ]
+        .to_vec()
+        .into()
+    } else {
+        [
+            buffer.read_f32::<LittleEndian>().unwrap(),
+            buffer.read_f32::<LittleEndian>().unwrap(),
+            buffer.read_f32::<LittleEndian>().unwrap(),
+        ]
+        .to_vec()
+        .into()
+    };
+
+    match aliases {
+        Some(aliases) => {
+            let mut out_data = serde_json::Value::Null;
+            let aliases = aliases.as_object().unwrap();
+            for (k, v) in aliases.iter() {
+                out_data[k] = data[v.as_u64().unwrap() as usize].clone();
+            }
+            out_data
+        }
+        None => data,
+    }
+}
+
+fn vec2_from_buffer(
+    mut buffer: &mut std::io::Cursor<&Vec<u8>>,
+    offset: u64,
+    schema: &serde_json::Value,
+) -> serde_json::Value {
+    buffer.seek(std::io::SeekFrom::Start(offset));
+    let aliases = schema.get("aliases");
+
+    let data: serde_json::Value = if schema
+        .get("precision")
+        .map(|x| x.as_str().unwrap_or("single"))
+        .unwrap_or("single")
+        == "double"
+    {
+        [
+            buffer.read_f64::<LittleEndian>().unwrap(),
+            buffer.read_f64::<LittleEndian>().unwrap(),
+        ]
+        .to_vec()
+        .into()
+    } else {
+        [
+            buffer.read_f32::<LittleEndian>().unwrap(),
+            buffer.read_f32::<LittleEndian>().unwrap(),
+        ]
+        .to_vec()
+        .into()
+    };
+
+    match aliases {
+        Some(aliases) => {
+            let mut out_data = serde_json::Value::Null;
+            let aliases = aliases.as_object().unwrap();
+            for (k, v) in aliases.iter() {
+                out_data[k] = data[v.as_u64().unwrap() as usize].clone();
+            }
+            out_data
+        }
+        None => data,
+    }
+}
+
+// def Vector4FromBinaryString(data, offset, schema, path, extraState):
+//     if 'aliases' in schema:
+//         return VectorLoader(data, offset, schema, path, extraState)
+//     else:
+//         if schema.get('precision', 'single') == 'double':
+//             return structTypes.vector4_double.unpack_from(data, offset)
+//         return structTypes.vector4_float.unpack_from(data, offset)
+
+// def Vector3FromBinaryString(data, offset, schema, path, extraState):
+//     if 'aliases' in schema:
+//         return VectorLoader(data, offset, schema, path, extraState)
+//     else:
+//         if schema.get('precision', 'single') == 'double':
+//             return structTypes.vector3_double.unpack_from(data, offset)
+//         return structTypes.vector3_float.unpack_from(data, offset)
+
+// def Vector2FromBinaryString(data, offset, schema, path, extraState):
+//     if 'aliases' in schema:
+//         return VectorLoader(data, offset, schema, path, extraState)
+//     else:
+//         if schema.get('precision', 'single') == 'double':
+//             return structTypes.vector2_double.unpack_from(data, offset)
+//         return structTypes.vector2_float.unpack_from(data, offset)
+
 type LoaderFn = fn(
     buffer: &mut std::io::Cursor<&Vec<u8>>,
     offset: u64,
@@ -471,6 +618,10 @@ lazy_static! {
         m.insert("dungeonID".to_string(), int_from_buffer);
         m.insert("typeListID".to_string(), int_from_buffer);
         m.insert("npcFleetTypeID".to_string(), int_from_buffer);
+        m.insert("vector4".to_string(), vec4_from_buffer);
+        m.insert("vector3".to_string(), vec3_from_buffer);
+        m.insert("vector2".to_string(), vec3_from_buffer);
+        m.insert("dict".to_string(), dict_from_buffer);
         m
     };
 }
@@ -481,11 +632,63 @@ fn parse_value_from_buffer(
     schema: serde_json::Value,
 ) -> serde_json::Value {
     let s_type = schema["type"].as_str().unwrap().to_string();
+    //  println!("{}", s_type);
     (loaders.get(&s_type).unwrap())(&mut buffer, offset, &schema)
 }
 
+fn dict_from_buffer(
+    mut buffer: &mut std::io::Cursor<&Vec<u8>>,
+    offset: u64,
+    schema: &serde_json::Value,
+) -> serde_json::Value {
+    trace!("Read Footer");
+    buffer.seek(std::io::SeekFrom::Start(offset));
+    let size_of_data = buffer.read_u32::<LittleEndian>().unwrap();
+    let offset_to_data = buffer.seek(std::io::SeekFrom::Current(0)).unwrap();
+    trace!("Jump to end of data");
+    buffer.seek(std::io::SeekFrom::Start(offset + size_of_data as u64)); // Jump to the end of the data, which is where the footer size is
+    trace!("Read footer size");
+    let size_of_footer = buffer.read_u32::<LittleEndian>().unwrap();
+    trace!("Jump to footer start");
+    buffer.seek(std::io::SeekFrom::Start(
+        offset + size_of_data as u64 - size_of_footer as u64,
+    )); // // Jump to the start of the footer // offset_to_data + size_of_data as u64 - size_of_footer as u64,
+
+    let mut footer_buffer = vec![0; size_of_footer as usize];
+    buffer.read_exact(&mut footer_buffer);
+
+    let footer = DictFooter::new(footer_buffer, schema.clone());
+    let value_schema = schema["valueTypes"].clone();
+    let mut output = serde_json::Value::Null;
+    for n in footer.into_iter() {
+        //
+        buffer
+            .seek(std::io::SeekFrom::Start(offset_to_data + n.offset as u64))
+            .unwrap();
+        output[n.key.to_string()] = match n.size {
+            Some(size) => {
+                let n = parse_value_from_buffer(
+                    &mut buffer,
+                    offset_to_data + n.offset as u64,
+                    value_schema.clone(),
+                );
+                n
+            }
+            None => {
+                let n = parse_value_from_buffer(
+                    &mut buffer,
+                    offset_to_data + n.offset as u64,
+                    value_schema.clone(),
+                );
+                n
+            }
+        };
+    }
+    output
+}
+
 fn main() -> Result<(), std::io::Error> {
-    simple_logger::init_with_level(log::Level::Trace).unwrap();
+    simple_logger::init_with_level(log::Level::Info).unwrap();
     let mut file = std::fs::File::open("0.sd")?;
 
     let mut full_buffer = Vec::new();
@@ -497,55 +700,59 @@ fn main() -> Result<(), std::io::Error> {
     let mut buffer = vec![0; schema_size as usize];
     reader.read_exact(&mut buffer)?;
     let schema = pickle_to_json(&serde_pickle::from_slice(&buffer).unwrap());
-    trace!("Read Footer");
-    let size_of_data = reader.read_u32::<LittleEndian>()?;
-    println!("{}", size_of_data);
+
     let offset_to_data = reader.seek(std::io::SeekFrom::Current(0))?;
-    trace!("Jump to end of data");
-    reader.seek(std::io::SeekFrom::Current((size_of_data - 4) as i64))?; // Jump to the end of the data, which is where the footer size is
-    trace!("Read footer size");
-    let size_of_footer = reader.read_u32::<LittleEndian>()?;
-    trace!("Jump to footer start");
-    reader.seek(std::io::SeekFrom::Current(-1 * (4 + size_of_footer as i64)))?; // // Jump to the start of the footer // offset_to_data + size_of_data as u64 - size_of_footer as u64,
+    let n = dict_from_buffer(&mut reader, offset_to_data, &schema);
+    // println!("{}", n);
+    // trace!("Read Footer");
+    // let size_of_data = reader.read_u32::<LittleEndian>()?;
+    // println!("{}", size_of_data);
+    // let offset_to_data = reader.seek(std::io::SeekFrom::Current(0))?;
+    // trace!("Jump to end of data");
+    // reader.seek(std::io::SeekFrom::Current((size_of_data - 4) as i64))?; // Jump to the end of the data, which is where the footer size is
+    // trace!("Read footer size");
+    // let size_of_footer = reader.read_u32::<LittleEndian>()?;
+    // trace!("Jump to footer start");
+    // reader.seek(std::io::SeekFrom::Current(-1 * (4 + size_of_footer as i64)))?; // // Jump to the start of the footer // offset_to_data + size_of_data as u64 - size_of_footer as u64,
 
-    let mut buffer = vec![0; size_of_footer as usize];
-    reader.read_exact(&mut buffer)?;
+    // let mut buffer = vec![0; size_of_footer as usize];
+    // reader.read_exact(&mut buffer)?;
 
-    let footer = DictFooter::new(buffer, schema.clone());
-    let value_schema = schema["valueTypes"].clone();
-    for n in footer.into_iter() {
-        //
-        reader
-            .seek(std::io::SeekFrom::Start(offset_to_data + n.offset as u64))
-            .unwrap();
-        match n.size {
-            Some(size) => {
-                println!("{}", size);
-                let mut item_buffer = vec![0; size as usize];
-                let off = reader.seek(std::io::SeekFrom::Current(0))?;
-                println!("Reading from {}", off);
-                reader.read_exact(&mut item_buffer)?;
-                let n = parse_value_from_buffer(
-                    &mut std::io::Cursor::new(&item_buffer),
-                    0,
-                    schema["valueTypes"].clone(),
-                );
-                println!("Read ITEM {}", n);
-            }
-            None => {}
-        };
-    }
+    // let footer = DictFooter::new(buffer, schema.clone());
+    // let value_schema = schema["valueTypes"].clone();
+    // for n in footer.into_iter() {
+    //     //
+    //     reader
+    //         .seek(std::io::SeekFrom::Start(offset_to_data + n.offset as u64))
+    //         .unwrap();
+    //     match n.size {
+    //         Some(size) => {
+    //             println!("{}", size);
+    //             let mut item_buffer = vec![0; size as usize];
+    //             let off = reader.seek(std::io::SeekFrom::Current(0))?;
+    //             println!("Reading from {}", off);
+    //             reader.read_exact(&mut item_buffer)?;
+    //             let n = parse_value_from_buffer(
+    //                 &mut std::io::Cursor::new(&item_buffer),
+    //                 0,
+    //                 schema["valueTypes"].clone(),
+    //             );
+    //             println!("Read ITEM {}", n);
+    //         }
+    //         None => {}
+    //     };
+    // }
 
-    // Make sure we are actually at end of the file now!
-    // assert!(reader.read_u32::<LittleEndian>().is_err());
-    reader.seek(std::io::SeekFrom::Start(offset_to_data))?;
+    // // Make sure we are actually at end of the file now!
+    // // assert!(reader.read_u32::<LittleEndian>().is_err());
+    // reader.seek(std::io::SeekFrom::Start(offset_to_data))?;
 
-    // Everthing here essentially operates of offset_to_data
+    // // Everthing here essentially operates of offset_to_data
 
-    let isSubObjectAnIndex = schema["valueTypes"]
-        .get("buildIndex")
-        .map_or(false, |x| x.as_bool().unwrap_or(false))
-        & (schema["valueTypes"]["type"] == "dict");
-    println!("{}", size_of_data);
+    // let isSubObjectAnIndex = schema["valueTypes"]
+    //     .get("buildIndex")
+    //     .map_or(false, |x| x.as_bool().unwrap_or(false))
+    //     & (schema["valueTypes"]["type"] == "dict");
+    // println!("{}", size_of_data);
     Ok(())
 }

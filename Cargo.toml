@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-    "fsd-converter",
+    "fsd2json",
     "neox-tools",
 ]

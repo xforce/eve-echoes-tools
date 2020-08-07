@@ -9,7 +9,7 @@ fn pickle_to_json(v: &serde_pickle::Value) -> serde_json::Value {
     match v {
         serde_pickle::Value::Bool(v) => (*v).into(),
         serde_pickle::Value::I64(v) => (*v).into(),
-        serde_pickle::Value::Int(v) => panic!("BigInt not supported"),
+        serde_pickle::Value::Int(_) => panic!("BigInt not supported"),
         serde_pickle::Value::F64(v) => (*v).into(),
         serde_pickle::Value::Bytes(v) => std::str::from_utf8(v).unwrap().into(),
         serde_pickle::Value::String(v) => (*v).clone().into(),
@@ -550,10 +550,12 @@ impl FsdValue {
                     buffer
                         .seek(std::io::SeekFrom::Start(offset_to_data + n.offset as u64))
                         .unwrap();
+                    // TODO(alexander): Figure out if we need size somehow
+                    // so far it all seems to work even if we just ignore it :)
                     output.insert(
                         n.key,
                         match n.size {
-                            Some(size) => FsdValue::from_buffer(
+                            Some(_) => FsdValue::from_buffer(
                                 buffer,
                                 offset_to_data + n.offset as u64,
                                 &value_schema,

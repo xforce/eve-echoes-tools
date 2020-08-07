@@ -1,4 +1,5 @@
 use byteorder::{LittleEndian, ReadBytesExt};
+use clap::{App, Arg};
 use lazy_static::lazy_static;
 use log::trace;
 use std::fmt;
@@ -173,7 +174,7 @@ impl<'a> Iterator for FooterIterator<'a> {
 }
 
 impl DictFooter {
-    pub fn new(buffer: Vec<u8>, schema: serde_json::Value) -> Self {
+    pub fn new(buffer: Vec<u8>, schema: &serde_json::Value) -> Self {
         let mut reader = BufReader::new(&buffer[..]);
         let size = reader.read_u32::<LittleEndian>().unwrap();
         // TODO(alexander): Handle other key types
@@ -205,7 +206,7 @@ impl DictFooter {
         } as u64;
 
         Self {
-            schema,
+            schema: schema.clone(),
             buffer,
             key_type,
             size,
@@ -259,7 +260,7 @@ fn float_from_buffer(
 ) -> serde_json::Value {
     buffer.seek(std::io::SeekFrom::Start(offset));
     if schema
-        .get("preci")
+        .get("precision")
         .map(|x| x.as_str().unwrap_or("single"))
         .unwrap_or("single")
         == "double"
@@ -596,6 +597,504 @@ type LoaderFn = fn(
     schema: &serde_json::Value,
 ) -> serde_json::Value;
 
+#[derive(Debug)]
+pub enum FsdDecodeError {
+    UnsupportedType(String),
+    IoError(std::io::Error),
+    Utf8Error(std::str::Utf8Error),
+}
+
+impl fmt::Display for FsdDecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl From<std::io::Error> for FsdDecodeError {
+    fn from(err: std::io::Error) -> Self {
+        Self::IoError(err)
+    }
+}
+
+impl From<std::str::Utf8Error> for FsdDecodeError {
+    fn from(err: std::str::Utf8Error) -> Self {
+        Self::Utf8Error(err)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FsdValue {
+    None,
+    Float(f32),
+    Double(f64),
+    Bool(bool),
+    UInt64(u64),
+    Int64(i64),
+    UInt32(u32),
+    Int32(i32),
+    Long(u64),
+    Object(std::collections::HashMap<String, FsdValue>),
+    List(Vec<FsdValue>),
+    String(String),
+    Dict(std::collections::HashMap<u64, FsdValue>),
+}
+
+impl From<f32> for FsdValue {
+    fn from(f: f32) -> Self {
+        Self::Float(f)
+    }
+}
+
+impl From<f64> for FsdValue {
+    fn from(f: f64) -> Self {
+        Self::Double(f)
+    }
+}
+
+impl From<bool> for FsdValue {
+    fn from(b: bool) -> Self {
+        Self::Bool(b)
+    }
+}
+
+impl From<i32> for FsdValue {
+    fn from(i: i32) -> Self {
+        Self::Int32(i)
+    }
+}
+
+impl From<u32> for FsdValue {
+    fn from(i: u32) -> Self {
+        Self::UInt32(i)
+    }
+}
+
+impl From<u64> for FsdValue {
+    fn from(i: u64) -> Self {
+        Self::UInt64(i)
+    }
+}
+
+impl From<i64> for FsdValue {
+    fn from(i: i64) -> Self {
+        Self::Int64(i)
+    }
+}
+
+impl From<String> for FsdValue {
+    fn from(s: String) -> Self {
+        Self::String(s)
+    }
+}
+
+impl From<std::collections::HashMap<u64, FsdValue>> for FsdValue {
+    fn from(d: std::collections::HashMap<u64, FsdValue>) -> Self {
+        Self::Dict(d)
+    }
+}
+
+impl From<std::collections::HashMap<String, FsdValue>> for FsdValue {
+    fn from(o: std::collections::HashMap<String, FsdValue>) -> Self {
+        Self::Object(o)
+    }
+}
+
+impl From<Vec<FsdValue>> for FsdValue {
+    fn from(v: Vec<FsdValue>) -> Self {
+        Self::List(v)
+    }
+}
+
+impl From<serde_json::Value> for FsdValue {
+    fn from(v: serde_json::Value) -> Self {
+        match v {
+            serde_json::Value::Null => FsdValue::None,
+            serde_json::Value::Bool(b) => b.into(),
+            serde_json::Value::Array(a) => a
+                .into_iter()
+                .map(|x| x.into())
+                .collect::<Vec<FsdValue>>()
+                .into(),
+            serde_json::Value::Number(n) => {
+                if n.is_f64() {
+                    n.as_f64().unwrap().into()
+                } else if n.is_i64() {
+                    n.as_i64().unwrap().into()
+                } else if n.is_u64() {
+                    n.as_u64().unwrap().into()
+                } else {
+                    Self::None
+                }
+            }
+            serde_json::Value::String(s) => s.into(),
+            serde_json::Value::Object(m) => m
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect::<std::collections::HashMap<String, FsdValue>>()
+                .into(),
+        }
+    }
+}
+
+impl FsdValue {
+    pub fn from_buffer(
+        mut buffer: &mut std::io::Cursor<&Vec<u8>>,
+        offset: u64,
+        schema: &serde_json::Value,
+    ) -> Result<Self, FsdDecodeError> {
+        let s_type = schema["type"].as_str().unwrap().to_string();
+        let is_double_precision = schema
+            .get("precision")
+            .map(|x| x.as_str().unwrap_or("single"))
+            .unwrap_or("single")
+            == "double";
+        let is_unsigned = {
+            let min = schema.get("min");
+            let exclusive_min = schema.get("exclusiveMin");
+            min.is_some() && min.map(|x| x.as_i64().unwrap_or(0)).unwrap_or(0) >= 0
+                || exclusive_min.is_some()
+                    && exclusive_min.map(|x| x.as_i64().unwrap_or(0)).unwrap_or(0) >= -1
+        };
+        let is_fixed_size = schema.get("fixedItemSize").is_some();
+        let aliases = schema.get("aliases");
+
+        // Jump to the start offset of the data
+        buffer.seek(std::io::SeekFrom::Start(offset))?;
+
+        // Map some types to a more primitive type
+        let s_type = {
+            match s_type.as_str() {
+                "typeID" => "int",
+                "localizationID" => "int",
+                "npcTag" => "int",
+                "deploymentType" => "int",
+                "npcEnemyFleetTypeID" => "int",
+                "groupBehaviorTreeID" => "int",
+                "npcCorporationID" => "int",
+                "spawnTableID" => "int",
+                "npcFleetCounterTableID" => "int",
+                "dungeonID" => "int",
+                "typeListID" => "int",
+                "npcFleetTypeID" => "int",
+                _ => s_type.as_str(),
+            }
+        };
+        match s_type {
+            "string" => {
+                let count = buffer.read_u32::<LittleEndian>()?;
+                let mut str_buffer = vec![0; count as usize];
+                buffer.read_exact(&mut str_buffer)?;
+
+                Ok(std::str::from_utf8(&str_buffer)?.to_string().into())
+            }
+            "float" => {
+                // TODO(alexander): We really really should have the schema pre-parsed into some kind of structure
+                // This is annoying and stupid to deal with
+                if is_double_precision {
+                    Ok(buffer.read_f64::<LittleEndian>()?.into())
+                } else {
+                    Ok(buffer.read_f32::<LittleEndian>()?.into())
+                }
+            }
+            "bool" => Ok((buffer.read_u8()? == 255).into()),
+            "int" => {
+                if is_unsigned {
+                    Ok(buffer.read_u32::<LittleEndian>()?.into())
+                } else {
+                    Ok(buffer.read_i32::<LittleEndian>()?.into())
+                }
+            }
+            "object" => {
+                // TODO(alexander): What a horrible mess this is...
+                let mut output = std::collections::HashMap::<String, FsdValue>::new();
+                let has_size = schema.get("size").is_some();
+                let mut variable_data_offset_base = 0u64;
+                let mut offset_attributes_lookup_table = std::collections::HashMap::new();
+                if !has_size {
+                    let mut offset_attributes: Vec<String> = schema
+                        ["attributesWithVariableOffsets"]
+                        .as_array()
+                        .unwrap_or(&Vec::new())
+                        .iter()
+                        .map(|x| x.as_str().unwrap().to_string())
+                        .collect();
+
+                    let optional_value_lookups =
+                        schema["optionalValueLookups"].as_object().unwrap();
+                    let end_of_fixed_size_data = schema["endOfFixedSizeData"].as_u64().unwrap_or(0);
+
+                    if !optional_value_lookups.is_empty() {
+                        buffer
+                            .seek(std::io::SeekFrom::Start(offset + end_of_fixed_size_data))
+                            .unwrap();
+                        let optional_attributes_field = buffer.read_u64::<LittleEndian>().unwrap();
+                        for (_, (k, v)) in optional_value_lookups.iter().enumerate() {
+                            //
+                            let i = v.as_u64().unwrap();
+                            if optional_attributes_field & i as u64 == 0 {
+                                offset_attributes.retain(|x| x != k);
+                            }
+                        }
+                    }
+                    let offset_attribute_array_start = offset + end_of_fixed_size_data + 8;
+                    let offset_attribute_offsets_type_size = 4 * offset_attributes.len();
+                    variable_data_offset_base =
+                        offset_attribute_array_start + offset_attribute_offsets_type_size as u64;
+                    buffer
+                        .seek(std::io::SeekFrom::Start(offset_attribute_array_start))
+                        .unwrap();
+                    let mut offsets_data = vec![0; offset_attribute_offsets_type_size];
+                    buffer.read_exact(&mut offsets_data)?;
+                    let offset_table: Vec<u32> = offsets_data
+                        .chunks_exact(4)
+                        .into_iter()
+                        .map(|a| as_u32_le(a))
+                        .collect();
+                    for (k, v) in offset_attributes.iter().zip(offset_table.iter()) {
+                        offset_attributes_lookup_table.insert(k.clone(), *v);
+                    }
+                }
+
+                let attributes = schema["attributes"].as_object().unwrap();
+                for (k, attribute_schema) in attributes.iter() {
+                    //
+                    let v = if schema["constantAttributeOffsets"].get(k).is_some() {
+                        Some(FsdValue::from_buffer(
+                            &mut buffer,
+                            offset + schema["constantAttributeOffsets"][k].as_u64().unwrap(),
+                            attribute_schema,
+                        )?)
+                    } else {
+                        //
+                        if !offset_attributes_lookup_table.contains_key(k) {
+                            if attribute_schema.get("default").is_some() {
+                                Some(attribute_schema["default"].clone().into())
+                            } else {
+                                None
+                            }
+                        } else {
+                            Some(FsdValue::from_buffer(
+                                &mut buffer,
+                                variable_data_offset_base
+                                    + offset_attributes_lookup_table[k] as u64,
+                                attribute_schema,
+                            )?)
+                        }
+                    };
+                    match v {
+                        Some(v) => {
+                            output.insert(k.clone(), v);
+                        }
+                        None => {
+                            // None is no default value but has lookup table entry
+                            // So we ignore
+                            // Because OPTIONAL field
+                        }
+                    }
+                }
+
+                Ok(output.into())
+            }
+            "list" => {
+                let fixed_length = false;
+                let count = buffer.read_u32::<LittleEndian>().unwrap();
+                let count_offset = if fixed_length { 0 } else { 4 };
+                let schema = &schema["itemTypes"];
+
+                let mut output = Vec::new();
+                if is_fixed_size {
+                    let item_size = schema["size"].as_u64().unwrap();
+
+                    let mut output = Vec::new();
+                    for i in 0..count {
+                        let total_offset = offset + count_offset + item_size * i as u64;
+                        output.push(FsdValue::from_buffer(buffer, total_offset, &schema)?);
+                    }
+                } else {
+                    for i in 0..count {
+                        //
+                        buffer.seek(std::io::SeekFrom::Start(
+                            offset + count_offset + 4 * i as u64,
+                        ))?;
+                        let n = buffer.read_u32::<LittleEndian>().unwrap();
+                        let data_offset_from_object_start = offset + n as u64;
+                        output.push(FsdValue::from_buffer(
+                            buffer,
+                            data_offset_from_object_start,
+                            &schema,
+                        )?);
+                    }
+                }
+
+                Ok(output.into())
+            }
+            "dict" => {
+                trace!("Read Footer");
+                let size_of_data = buffer.read_u32::<LittleEndian>()?;
+                let offset_to_data = buffer.seek(std::io::SeekFrom::Current(0))?;
+
+                buffer.seek(std::io::SeekFrom::Start(offset + size_of_data as u64))?; // Jump to the end of the data, which is where the footer size is
+                let size_of_footer = buffer.read_u32::<LittleEndian>()?;
+                trace!("Jump to footer start");
+                buffer.seek(std::io::SeekFrom::Start(
+                    offset + size_of_data as u64 - size_of_footer as u64,
+                ))?; // // Jump to the start of the footer // offset_to_data + size_of_data as u64 - size_of_footer as u64,
+
+                let mut footer_buffer = vec![0; size_of_footer as usize];
+                buffer.read_exact(&mut footer_buffer)?;
+                let footer = DictFooter::new(footer_buffer, &schema);
+
+                let value_schema = &schema["valueTypes"];
+                let mut output = std::collections::HashMap::<u64, FsdValue>::new();
+                for n in footer.into_iter() {
+                    //
+                    buffer
+                        .seek(std::io::SeekFrom::Start(offset_to_data + n.offset as u64))
+                        .unwrap();
+                    output.insert(
+                        n.key,
+                        match n.size {
+                            Some(size) => FsdValue::from_buffer(
+                                buffer,
+                                offset_to_data + n.offset as u64,
+                                &value_schema,
+                            )?,
+                            None => FsdValue::from_buffer(
+                                buffer,
+                                offset_to_data + n.offset as u64,
+                                &value_schema,
+                            )?,
+                        },
+                    );
+                }
+                Ok(output.into())
+            }
+            "long" => Ok(buffer.read_u64::<LittleEndian>()?.into()),
+            // TODO(alexander): Merge the vector things somehow
+            "vector4" => {
+                //
+                Ok(if is_double_precision {
+                    let data: Vec<FsdValue> = [
+                        buffer.read_f64::<LittleEndian>()?.into(),
+                        buffer.read_f64::<LittleEndian>()?.into(),
+                        buffer.read_f64::<LittleEndian>()?.into(),
+                        buffer.read_f64::<LittleEndian>()?.into(),
+                    ]
+                    .to_vec();
+                    match aliases {
+                        Some(aliases) => {
+                            let mut out_data = std::collections::HashMap::<String, FsdValue>::new();
+                            let aliases = aliases.as_object().unwrap();
+                            for (k, v) in aliases.into_iter() {
+                                out_data
+                                    .insert(k.clone(), data[v.as_u64().unwrap() as usize].clone());
+                            }
+                            out_data.into()
+                        }
+                        None => data.into(),
+                    }
+                } else {
+                    let data: Vec<FsdValue> = [
+                        buffer.read_f32::<LittleEndian>()?.into(),
+                        buffer.read_f32::<LittleEndian>()?.into(),
+                        buffer.read_f32::<LittleEndian>()?.into(),
+                        buffer.read_f32::<LittleEndian>()?.into(),
+                    ]
+                    .to_vec();
+                    match aliases {
+                        Some(aliases) => {
+                            let mut out_data = std::collections::HashMap::<String, FsdValue>::new();
+                            let aliases = aliases.as_object().unwrap();
+                            for (k, v) in aliases.into_iter() {
+                                out_data
+                                    .insert(k.clone(), data[v.as_u64().unwrap() as usize].clone());
+                            }
+                            out_data.into()
+                        }
+                        None => data.into(),
+                    }
+                })
+            }
+            "vector3" => Ok(if is_double_precision {
+                let data: Vec<FsdValue> = [
+                    buffer.read_f64::<LittleEndian>()?.into(),
+                    buffer.read_f64::<LittleEndian>()?.into(),
+                    buffer.read_f64::<LittleEndian>()?.into(),
+                    buffer.read_f64::<LittleEndian>()?.into(),
+                ]
+                .to_vec();
+                match aliases {
+                    Some(aliases) => {
+                        let mut out_data = std::collections::HashMap::<String, FsdValue>::new();
+                        let aliases = aliases.as_object().unwrap();
+                        for (k, v) in aliases.into_iter() {
+                            out_data.insert(k.clone(), data[v.as_u64().unwrap() as usize].clone());
+                        }
+                        out_data.into()
+                    }
+                    None => data.into(),
+                }
+            } else {
+                let data: Vec<FsdValue> = [
+                    buffer.read_f32::<LittleEndian>()?.into(),
+                    buffer.read_f32::<LittleEndian>()?.into(),
+                    buffer.read_f32::<LittleEndian>()?.into(),
+                    buffer.read_f32::<LittleEndian>()?.into(),
+                ]
+                .to_vec();
+                match aliases {
+                    Some(aliases) => {
+                        let mut out_data = std::collections::HashMap::<String, FsdValue>::new();
+                        let aliases = aliases.as_object().unwrap();
+                        for (k, v) in aliases.into_iter() {
+                            out_data.insert(k.clone(), data[v.as_u64().unwrap() as usize].clone());
+                        }
+                        out_data.into()
+                    }
+                    None => data.into(),
+                }
+            }),
+            "vector2" => Ok(if is_double_precision {
+                let data: Vec<FsdValue> = [
+                    buffer.read_f64::<LittleEndian>()?.into(),
+                    buffer.read_f64::<LittleEndian>()?.into(),
+                ]
+                .to_vec();
+                match aliases {
+                    Some(aliases) => {
+                        let mut out_data = std::collections::HashMap::<String, FsdValue>::new();
+                        let aliases = aliases.as_object().unwrap();
+                        for (k, v) in aliases.into_iter() {
+                            out_data.insert(k.clone(), data[v.as_u64().unwrap() as usize].clone());
+                        }
+                        out_data.into()
+                    }
+                    None => data.into(),
+                }
+            } else {
+                let data: Vec<FsdValue> = [
+                    buffer.read_f32::<LittleEndian>()?.into(),
+                    buffer.read_f32::<LittleEndian>()?.into(),
+                ]
+                .to_vec();
+                match aliases {
+                    Some(aliases) => {
+                        let mut out_data = std::collections::HashMap::<String, FsdValue>::new();
+                        let aliases = aliases.as_object().unwrap();
+                        for (k, v) in aliases.into_iter() {
+                            out_data.insert(k.clone(), data[v.as_u64().unwrap() as usize].clone());
+                        }
+                        out_data.into()
+                    }
+                    None => data.into(),
+                }
+            }),
+            _ => Err(FsdDecodeError::UnsupportedType(s_type.to_string())),
+        }
+        //
+    }
+}
+
 lazy_static! {
     static ref loaders: std::collections::HashMap<String, LoaderFn> = {
         let mut m: std::collections::HashMap<String, LoaderFn> = std::collections::HashMap::new();
@@ -603,11 +1102,12 @@ lazy_static! {
         m.insert("bool".to_string(), bool_from_buffer);
         m.insert("int".to_string(), int_from_buffer);
         m.insert("long".to_string(), long_from_buffer);
-        m.insert("typeID".to_string(), int_from_buffer);
-        m.insert("localizationID".to_string(), int_from_buffer);
+
         m.insert("object".to_string(), object_from_buffer);
         m.insert("string".to_string(), string_from_buffer);
         m.insert("list".to_string(), list_from_buffer);
+        m.insert("typeID".to_string(), int_from_buffer);
+        m.insert("localizationID".to_string(), int_from_buffer);
         m.insert("npcTag".to_string(), int_from_buffer);
         m.insert("deploymentType".to_string(), int_from_buffer);
         m.insert("npcEnemyFleetTypeID".to_string(), int_from_buffer);
@@ -657,7 +1157,7 @@ fn dict_from_buffer(
     let mut footer_buffer = vec![0; size_of_footer as usize];
     buffer.read_exact(&mut footer_buffer);
 
-    let footer = DictFooter::new(footer_buffer, schema.clone());
+    let footer = DictFooter::new(footer_buffer, &schema);
     let value_schema = schema["valueTypes"].clone();
     let mut output = serde_json::Value::Null;
     for n in footer.into_iter() {
@@ -687,8 +1187,39 @@ fn dict_from_buffer(
     output
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn main() -> Result<(), FsdDecodeError> {
     simple_logger::init_with_level(log::Level::Info).unwrap();
+
+    let matches = App::new("NeoX NPK Tool")
+        .version("1.0")
+        .author("Alexander Guettler <alexander@guettler.io>")
+        .arg(
+            Arg::with_name("MODE")
+                .possible_values(&["x", "p"]) // TODO(alexander): Add some kind of info mode, print file count etc.
+                .about("Specifies whether to extract (x) or pack (p) the specified directory")
+                .required(true)
+                .index(1),
+        )
+        .arg(
+            Arg::with_name("INPUT")
+                .about("The NPK file to be operated on")
+                .required(true)
+                .index(2),
+        )
+        .arg(
+            Arg::with_name("DIR")
+                .value_name("DIR")
+                .about("The directory where this NPK file should be extracted to")
+                .default_value("out")
+                .index(3)
+                .takes_value(true),
+        )
+        .get_matches();
+
+    let input_file = matches.value_of("INPUT").unwrap();
+
+    let mode = matches.value_of("MODE").unwrap();
+
     let mut file = std::fs::File::open("0.sd")?;
 
     let mut full_buffer = Vec::new();
@@ -701,8 +1232,15 @@ fn main() -> Result<(), std::io::Error> {
     reader.read_exact(&mut buffer)?;
     let schema = pickle_to_json(&serde_pickle::from_slice(&buffer).unwrap());
 
+    let is_sub_object_at_index = schema["valueTypes"]
+        .get("buildIndex")
+        .map_or(false, |x| x.as_bool().unwrap_or(false))
+        & (schema["valueTypes"]["type"] == "dict");
+
     let offset_to_data = reader.seek(std::io::SeekFrom::Current(0))?;
-    let n = dict_from_buffer(&mut reader, offset_to_data, &schema);
+    let n = FsdValue::from_buffer(&mut reader, offset_to_data, &schema)?;
+
+    println!("Value {:?}", n);
     // println!("{}", n);
     // trace!("Read Footer");
     // let size_of_data = reader.read_u32::<LittleEndian>()?;

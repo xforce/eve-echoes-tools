@@ -641,7 +641,6 @@ impl FsdValue {
                 if is_fixed_size {
                     let item_size = schema["size"].as_u64().unwrap();
 
-                    let mut output = Vec::new();
                     for i in 0..count {
                         let total_offset = offset + count_offset + item_size * i as u64;
                         output.push(FsdValue::from_buffer(buffer, total_offset, &schema)?);
@@ -879,11 +878,12 @@ fn main() -> Result<(), FsdDecodeError> {
         let schema = pickle_to_json(&serde_pickle::from_slice(&buffer).unwrap());
         schema
     };
+    trace!("{}", schema);
 
     let _is_sub_object_at_index = schema["valueTypes"]
         .get("buildIndex")
         .map_or(false, |x| x.as_bool().unwrap_or(false))
-        & (schema["valueTypes"]["type"] == "dict");
+        && (schema["valueTypes"]["type"] == "dict");
 
     let offset_to_data = reader.seek(std::io::SeekFrom::Current(0))?;
     let n = FsdValue::from_buffer(&mut reader, offset_to_data, &schema)?;

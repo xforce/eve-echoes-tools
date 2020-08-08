@@ -4,6 +4,8 @@
 
 Convert Eve Echoes Static Data FSD Files to JSON for easier inspection.
 
+Converted files can be found [here](http://eve-echoes-data.s3-website.eu-central-1.amazonaws.com/)
+
 ## Installing
 
 All you have to do to build it is clone it an run on of the following:

@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::{App, Arg};
-use log::trace;
+use log::{debug, info, trace};
 use std::fmt;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
@@ -46,6 +46,7 @@ enum FooterKeyType {
     OffsetLongWithSize,
     OffsetInt,
     OffsetLong,
+    Arbitrary,
 }
 
 #[derive(Debug)]
@@ -60,7 +61,7 @@ struct DictFooter {
 
 #[derive(Debug)]
 struct FooterEntry {
-    pub key: u64,
+    pub key: FsdValue,
     pub offset: u32,
     pub size: Option<u32>,
 }
@@ -91,29 +92,75 @@ impl<'a> Iterator for FooterIterator<'a> {
         } else {
             let mut reader = std::io::Cursor::new(&self.footer.buffer);
 
-            reader
-                .seek(std::io::SeekFrom::Start(
-                    self.index as u64 * self.footer.item_size + self.footer.start_offset,
-                ))
-                .unwrap();
-            let key = if self.footer.key_type == FooterKeyType::OffsetInt
-                || self.footer.key_type == FooterKeyType::OffsetIntWithSize
-            {
-                reader.read_u32::<LittleEndian>().unwrap() as u64
-            } else {
-                reader.read_u64::<LittleEndian>().unwrap()
-            };
+            match self.footer.key_type {
+                FooterKeyType::Arbitrary => {
+                    reader
+                        .seek(std::io::SeekFrom::Start(
+                            self.index as u64 * self.footer.item_size + self.footer.start_offset,
+                        ))
+                        .unwrap();
+                    let n = reader.read_u32::<LittleEndian>().unwrap();
+                    let data_offset_from_object_start = self.footer.start_offset + n as u64;
+                    //
+                    let key = FsdValue::from_buffer(
+                        &mut reader,
+                        data_offset_from_object_start - 4,
+                        &self.footer.schema["keyFooter"]["itemTypes"],
+                    )
+                    .unwrap();
 
-            let offset = reader.read_u32::<LittleEndian>().unwrap();
+                    Some(FooterEntry {
+                        key: match &key {
+                            FsdValue::Object(o) => o["key"].clone(),
+                            _ => key.clone(),
+                        },
+                        size: match &key {
+                            FsdValue::Object(o) => match o["size"] {
+                                FsdValue::UInt32(v) => Some(v),
+                                _ => None,
+                            },
+                            _ => None,
+                        },
+                        offset: match &key {
+                            FsdValue::Object(o) => match o["offset"] {
+                                FsdValue::UInt32(v) => v,
+                                _ => 0,
+                            },
+                            _ => 0,
+                        },
+                    })
+                }
+                _ => {
+                    reader
+                        .seek(std::io::SeekFrom::Start(
+                            self.index as u64 * self.footer.item_size + self.footer.start_offset,
+                        ))
+                        .unwrap();
 
-            let size = if self.footer.key_type == FooterKeyType::OffsetIntWithSize
-                || self.footer.key_type == FooterKeyType::OffsetLongWithSize
-            {
-                Some(reader.read_u32::<LittleEndian>().unwrap())
-            } else {
-                None
-            };
-            Some(Self::Item { key, offset, size })
+                    let key = if self.footer.key_type == FooterKeyType::OffsetInt
+                        || self.footer.key_type == FooterKeyType::OffsetIntWithSize
+                    {
+                        reader.read_u32::<LittleEndian>().unwrap() as u64
+                    } else {
+                        reader.read_u64::<LittleEndian>().unwrap()
+                    };
+
+                    let offset = reader.read_u32::<LittleEndian>().unwrap();
+
+                    let size = if self.footer.key_type == FooterKeyType::OffsetIntWithSize
+                        || self.footer.key_type == FooterKeyType::OffsetLongWithSize
+                    {
+                        Some(reader.read_u32::<LittleEndian>().unwrap())
+                    } else {
+                        None
+                    };
+                    Some(Self::Item {
+                        key: key.into(),
+                        offset,
+                        size,
+                    })
+                }
+            }
         }
     }
 }
@@ -122,41 +169,61 @@ impl DictFooter {
     pub fn new(buffer: Vec<u8>, schema: &serde_json::Value) -> Self {
         let mut reader = BufReader::new(&buffer[..]);
         let size = reader.read_u32::<LittleEndian>().unwrap();
-        // TODO(alexander): Handle other key types
-        let is_int_key = schema["keyTypes"]["type"].as_str().unwrap() == "int";
-        let has_size = !schema["keyFooter"]["itemTypes"]["attributes"]["size"].is_null();
-        let key_type = if is_int_key {
-            if has_size {
-                FooterKeyType::OffsetIntWithSize
+
+        let key_type = schema["keyTypes"]["type"].as_str().unwrap().to_string();
+        if key_type == "int" || key_type == "long" {
+            // TODO(alexander): Handle other key types
+            let is_int_key = schema["keyTypes"]["type"].as_str().unwrap() == "int";
+            let has_size = !schema["keyFooter"]["itemTypes"]["attributes"]["size"].is_null();
+            let key_type = if is_int_key {
+                if has_size {
+                    FooterKeyType::OffsetIntWithSize
+                } else {
+                    FooterKeyType::OffsetInt
+                }
             } else {
-                FooterKeyType::OffsetInt
+                if has_size {
+                    FooterKeyType::OffsetLongWithSize
+                } else {
+                    FooterKeyType::OffsetLong
+                }
+            };
+
+            let item_size = match key_type {
+                FooterKeyType::OffsetInt => std::mem::size_of::<u32>() + std::mem::size_of::<u32>(),
+                FooterKeyType::OffsetIntWithSize => {
+                    std::mem::size_of::<u32>()
+                        + std::mem::size_of::<u32>()
+                        + std::mem::size_of::<u32>()
+                }
+                FooterKeyType::OffsetLong => {
+                    std::mem::size_of::<u64>() + std::mem::size_of::<u32>()
+                }
+                FooterKeyType::OffsetLongWithSize => {
+                    std::mem::size_of::<u64>()
+                        + std::mem::size_of::<u32>()
+                        + std::mem::size_of::<u32>()
+                }
+                _ => 0,
+            } as u64;
+
+            Self {
+                schema: schema.clone(),
+                buffer,
+                key_type,
+                size,
+                item_size,
+                start_offset: 4,
             }
         } else {
-            if has_size {
-                FooterKeyType::OffsetLongWithSize
-            } else {
-                FooterKeyType::OffsetLong
+            Self {
+                schema: schema.clone(),
+                buffer,
+                key_type: FooterKeyType::Arbitrary,
+                size,
+                item_size: 4,
+                start_offset: 4,
             }
-        };
-
-        let item_size = match key_type {
-            FooterKeyType::OffsetInt => std::mem::size_of::<u32>() + std::mem::size_of::<u32>(),
-            FooterKeyType::OffsetIntWithSize => {
-                std::mem::size_of::<u32>() + std::mem::size_of::<u32>() + std::mem::size_of::<u32>()
-            }
-            FooterKeyType::OffsetLong => std::mem::size_of::<u64>() + std::mem::size_of::<u32>(),
-            FooterKeyType::OffsetLongWithSize => {
-                std::mem::size_of::<u64>() + std::mem::size_of::<u32>() + std::mem::size_of::<u32>()
-            }
-        } as u64;
-
-        Self {
-            schema: schema.clone(),
-            buffer,
-            key_type,
-            size,
-            item_size,
-            start_offset: 4,
         }
     }
 }
@@ -208,6 +275,30 @@ pub enum FsdValue {
     List(Vec<FsdValue>),
     String(String),
     Dict(std::collections::HashMap<u64, FsdValue>),
+    Map(std::collections::HashMap<FsdValue, FsdValue>),
+}
+
+impl Eq for FsdValue {}
+
+impl std::hash::Hash for FsdValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::None => 0.hash(state),
+            Self::Float(f) => f.to_le_bytes().hash(state),
+            Self::Double(f) => f.to_le_bytes().hash(state),
+            Self::Bool(f) => f.hash(state),
+            Self::UInt64(f) => f.hash(state),
+            Self::Int64(f) => f.hash(state),
+            Self::UInt32(f) => f.hash(state),
+            Self::Int32(f) => f.hash(state),
+            Self::Long(f) => f.hash(state),
+            Self::Object(_) => 0.hash(state),
+            Self::List(f) => f.hash(state),
+            Self::String(f) => f.hash(state),
+            Self::Dict(_) => 0.hash(state),
+            Self::Map(_) => 0.hash(state),
+        };
+    }
 }
 
 impl From<f32> for FsdValue {
@@ -267,6 +358,12 @@ impl From<std::collections::HashMap<u64, FsdValue>> for FsdValue {
 impl From<std::collections::HashMap<String, FsdValue>> for FsdValue {
     fn from(o: std::collections::HashMap<String, FsdValue>) -> Self {
         Self::Object(o)
+    }
+}
+
+impl From<std::collections::HashMap<FsdValue, FsdValue>> for FsdValue {
+    fn from(o: std::collections::HashMap<FsdValue, FsdValue>) -> Self {
+        Self::Map(o)
     }
 }
 
@@ -331,6 +428,29 @@ impl Into<serde_json::Value> for FsdValue {
                 .map(|(k, v)| (k.to_string(), v.into()))
                 .collect::<serde_json::Map<String, serde_json::Value>>()
                 .into(),
+            Self::Map(f) => f
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.into()))
+                .collect::<serde_json::Map<String, serde_json::Value>>()
+                .into(),
+        }
+    }
+}
+
+impl std::string::ToString for FsdValue {
+    fn to_string(&self) -> String {
+        match self {
+            Self::None => "null".into(),
+            Self::Float(f) => f.to_string(),
+            Self::Double(f) => f.to_string(),
+            Self::Bool(f) => f.to_string(),
+            Self::UInt64(f) => f.to_string(),
+            Self::Int64(f) => f.to_string(),
+            Self::UInt32(f) => f.to_string(),
+            Self::Int32(f) => f.to_string(),
+            Self::Long(f) => f.to_string(),
+            Self::String(f) => f.to_string(),
+            _ => format!("{:?}", self),
         }
     }
 }
@@ -342,6 +462,7 @@ impl FsdValue {
         schema: &serde_json::Value,
     ) -> Result<Self, FsdDecodeError> {
         let s_type = schema["type"].as_str().unwrap().to_string();
+        debug!("Parsing {} at {}", s_type, offset);
         let is_double_precision = schema
             .get("precision")
             .map(|x| x.as_str().unwrap_or("single"))
@@ -421,7 +542,6 @@ impl FsdValue {
                     let optional_value_lookups =
                         schema["optionalValueLookups"].as_object().unwrap();
                     let end_of_fixed_size_data = schema["endOfFixedSizeData"].as_u64().unwrap_or(0);
-
                     if !optional_value_lookups.is_empty() {
                         buffer
                             .seek(std::io::SeekFrom::Start(offset + end_of_fixed_size_data))
@@ -439,6 +559,7 @@ impl FsdValue {
                     let offset_attribute_offsets_type_size = 4 * offset_attributes.len();
                     variable_data_offset_base =
                         offset_attribute_array_start + offset_attribute_offsets_type_size as u64;
+
                     buffer
                         .seek(std::io::SeekFrom::Start(offset_attribute_array_start))
                         .unwrap();
@@ -450,6 +571,11 @@ impl FsdValue {
                         .map(|a| as_u32_le(a))
                         .collect();
                     for (k, v) in offset_attributes.iter().zip(offset_table.iter()) {
+                        trace!(
+                            "Loading offset lookup for {} -> {}",
+                            k,
+                            variable_data_offset_base + (*v) as u64
+                        );
                         offset_attributes_lookup_table.insert(k.clone(), *v);
                     }
                 }
@@ -458,6 +584,11 @@ impl FsdValue {
                 for (k, attribute_schema) in attributes.iter() {
                     //
                     let v = if schema["constantAttributeOffsets"].get(k).is_some() {
+                        trace!(
+                            "Parsing object field ({}) with constant offset {}",
+                            k,
+                            schema["constantAttributeOffsets"][k]
+                        );
                         Some(FsdValue::from_buffer(
                             &mut buffer,
                             offset + schema["constantAttributeOffsets"][k].as_u64().unwrap(),
@@ -466,12 +597,18 @@ impl FsdValue {
                     } else {
                         //
                         if !offset_attributes_lookup_table.contains_key(k) {
+                            trace!("Check for default value for {}", k);
                             if attribute_schema.get("default").is_some() {
                                 Some(attribute_schema["default"].clone().into())
                             } else {
                                 None
                             }
                         } else {
+                            trace!(
+                                "Parsing object field ({}) with offset lookup {}",
+                                k,
+                                offset_attributes_lookup_table[k]
+                            );
                             Some(FsdValue::from_buffer(
                                 &mut buffer,
                                 variable_data_offset_base
@@ -539,14 +676,23 @@ impl FsdValue {
                     offset + size_of_data as u64 - size_of_footer as u64,
                 ))?; // // Jump to the start of the footer // offset_to_data + size_of_data as u64 - size_of_footer as u64,
 
+                trace!("Load footer buffer");
                 let mut footer_buffer = vec![0; size_of_footer as usize];
                 buffer.read_exact(&mut footer_buffer)?;
+
+                trace!(
+                    "Parse footer as {} with size {}",
+                    offset + size_of_data as u64 - size_of_footer as u64,
+                    size_of_footer
+                );
                 let footer = DictFooter::new(footer_buffer, &schema);
 
+                trace!("Read values");
                 let value_schema = &schema["valueTypes"];
-                let mut output = std::collections::HashMap::<u64, FsdValue>::new();
+                let mut output = std::collections::HashMap::<FsdValue, FsdValue>::new();
                 for n in footer.into_iter() {
                     //
+                    trace!("Read {:?} at {}", n.key, offset_to_data + n.offset as u64);
                     buffer
                         .seek(std::io::SeekFrom::Start(offset_to_data + n.offset as u64))
                         .unwrap();
@@ -703,14 +849,22 @@ fn main() -> Result<(), FsdDecodeError> {
         .version("1.0")
         .author("Alexander Guettler <alexander@guettler.io>")
         .arg(
+            Arg::with_name("OUT")
+                .short('o')
+                .about("Output directory for the resulting .json file")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("INPUT")
                 .about("The FSD file to be converted to json")
                 .required(true)
+                .takes_value(true)
                 .index(1),
         )
         .get_matches();
 
     let input_file = matches.value_of("INPUT").unwrap();
+    info!("Processing {}", input_file);
     let mut file = std::fs::File::open(input_file)?;
 
     let mut full_buffer = Vec::new();
@@ -738,6 +892,11 @@ fn main() -> Result<(), FsdDecodeError> {
         "{}.json",
         Path::new(input_file).file_stem().unwrap().to_str().unwrap()
     );
+    let out_file = match matches.value_of("OUT") {
+        Some(v) => std::path::Path::new(v),
+        None => std::path::Path::new(""),
+    }
+    .join(out_file);
 
     let v: serde_json::Value = n.into();
     std::fs::write(out_file, &serde_json::to_string_pretty(&v).unwrap())?;

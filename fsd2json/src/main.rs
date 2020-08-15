@@ -898,8 +898,21 @@ fn main() -> Result<(), FsdDecodeError> {
     }
     .join(out_file);
 
+    let out_file_schema = format!(
+        "{}.schema.json",
+        Path::new(input_file).file_stem().unwrap().to_str().unwrap()
+    );
+    let out_file_schema = match matches.value_of("OUT") {
+        Some(v) => std::path::Path::new(v),
+        None => std::path::Path::new(""),
+    }
+    .join(out_file_schema);
     let v: serde_json::Value = n.into();
+    let vs: serde_json::Value = schema.into();
+
     std::fs::write(out_file, &serde_json::to_string_pretty(&v).unwrap())?;
+    std::fs::write(out_file_schema, &serde_json::to_string_pretty(&vs).unwrap())?;
+
 
     Ok(())
 }

@@ -87,7 +87,7 @@ impl<'a> Iterator for FooterIterator<'a> {
     type Item = FooterEntry;
     fn next(&mut self) -> Option<Self::Item> {
         self.index += 1;
-        if self.index >= self.footer.size as usize {
+        if self.index > self.footer.size as usize {
             None
         } else {
             let mut reader = std::io::Cursor::new(&self.footer.buffer);
@@ -96,7 +96,7 @@ impl<'a> Iterator for FooterIterator<'a> {
                 FooterKeyType::Arbitrary => {
                     reader
                         .seek(std::io::SeekFrom::Start(
-                            self.index as u64 * self.footer.item_size + self.footer.start_offset,
+                            (self.index - 1) as u64 * self.footer.item_size + self.footer.start_offset,
                         ))
                         .unwrap();
                     let n = reader.read_u32::<LittleEndian>().unwrap();
@@ -133,7 +133,7 @@ impl<'a> Iterator for FooterIterator<'a> {
                 _ => {
                     reader
                         .seek(std::io::SeekFrom::Start(
-                            self.index as u64 * self.footer.item_size + self.footer.start_offset,
+                            (self.index - 1) as u64 * self.footer.item_size + self.footer.start_offset,
                         ))
                         .unwrap();
 

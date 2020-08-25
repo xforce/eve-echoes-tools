@@ -112,6 +112,7 @@ def dump_static_data_fsd(xapk_temp_dir):
             obb_zip.extractall(obb_path)
     static_data_dir = os.path.join(
         xapk_temp_dir, "Android", "obb", "com.netease.eve.en", "res", "staticdata")
+    static_data_dir = os.path.abspath(os.path.realpath(static_data_dir))
     for root, dirnames, filenames in os.walk(static_data_dir):
         for filename in fnmatch.filter(filenames, '*.sd'):
             dir = os.path.relpath(root, static_data_dir)
@@ -133,7 +134,8 @@ def transform_dict(d):
                 "['\\n']").split("': ")[1:])
 
 
-def convert_files(root_dir):
+def convert_files(root_dir, sub):
+    root_dir = os.path.abspath(os.path.realpath(root_dir))
     for root, dirnames, filenames in os.walk(root_dir):
         for filename in fnmatch.filter(filenames, '*.py'):
             directory = os.path.relpath(root, root_dir)
@@ -155,9 +157,8 @@ def convert_files(root_dir):
                         #  Only 1 export
 
                     if len(members) > 0:
-
                         out_file = os.path.join(
-                            args.outdir, "py_data", filename.replace(".py", ".json"))
+                            args.outdir, "py_data", sub, directory, os.path.basename(filename).replace(".py", ".json"))
 
                         out_dir = os.path.dirname(out_file)
                         if not os.path.exists(out_dir):
@@ -189,7 +190,8 @@ with tempdir() as xapk_temp_dir:
         dump_static_data_fsd(xapk_temp_dir)
 
         # Script data to json
-        convert_files(os.path.join(args.outdir, "script", "data"))
-        convert_files(os.path.join(args.outdir, "script", "data_common"))
+        convert_files(os.path.join(args.outdir, "script", "data"), "data")
+        convert_files(os.path.join(args.outdir, "script",
+                                   "data_common"), "data_common")
 
 # print(script_npk)

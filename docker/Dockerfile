@@ -11,7 +11,7 @@ RUN apt clean \
 
 COPY cmd.sh /opt/
 
-RUN pip2 install mmh3 rotor xdis
+RUN pip2 install mmh3 rotor xdis spark-parser
 
 RUN git clone --recursive https://github.com/xforce/eve-echoes-tools.git /opt/eve-echoes-tools
 

@@ -13,7 +13,7 @@ The easiest way this can be done is by using the docker image which has all the 
 Simply run. (With the latest Eve Echoes XAPK in the local directory named `eve.xapk`)
 
 ```
-docker run -v$(pwd):/data cookiemagic/evee-tools /data/eve.xapk /data/staticdata
+docker run -v$(pwd):/data cookiemagic/evee-tools dump_static /data/eve.xapk /data/staticdata
 ```
 
 > On windows adjust the Mount accordingly.

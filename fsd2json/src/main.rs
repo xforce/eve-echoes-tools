@@ -96,7 +96,8 @@ impl<'a> Iterator for FooterIterator<'a> {
                 FooterKeyType::Arbitrary => {
                     reader
                         .seek(std::io::SeekFrom::Start(
-                            (self.index - 1) as u64 * self.footer.item_size + self.footer.start_offset,
+                            (self.index - 1) as u64 * self.footer.item_size
+                                + self.footer.start_offset,
                         ))
                         .unwrap();
                     let n = reader.read_u32::<LittleEndian>().unwrap();
@@ -133,7 +134,8 @@ impl<'a> Iterator for FooterIterator<'a> {
                 _ => {
                     reader
                         .seek(std::io::SeekFrom::Start(
-                            (self.index - 1) as u64 * self.footer.item_size + self.footer.start_offset,
+                            (self.index - 1) as u64 * self.footer.item_size
+                                + self.footer.start_offset,
                         ))
                         .unwrap();
 
@@ -766,7 +768,6 @@ impl FsdValue {
                     buffer.read_f64::<LittleEndian>()?.into(),
                     buffer.read_f64::<LittleEndian>()?.into(),
                     buffer.read_f64::<LittleEndian>()?.into(),
-                    buffer.read_f64::<LittleEndian>()?.into(),
                 ]
                 .to_vec();
                 match aliases {
@@ -782,7 +783,6 @@ impl FsdValue {
                 }
             } else {
                 let data: Vec<FsdValue> = [
-                    buffer.read_f32::<LittleEndian>()?.into(),
                     buffer.read_f32::<LittleEndian>()?.into(),
                     buffer.read_f32::<LittleEndian>()?.into(),
                     buffer.read_f32::<LittleEndian>()?.into(),
@@ -912,7 +912,6 @@ fn main() -> Result<(), FsdDecodeError> {
 
     std::fs::write(out_file, &serde_json::to_string_pretty(&v).unwrap())?;
     std::fs::write(out_file_schema, &serde_json::to_string_pretty(&vs).unwrap())?;
-
 
     Ok(())
 }

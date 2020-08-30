@@ -13,6 +13,7 @@ COPY cmd.sh /opt/
 
 RUN pip2 install mmh3 rotor xdis spark-parser
 
+ADD https://api.github.com/repos/xforce/eve-echoes-tools/compare/main...HEAD /dev/null
 RUN git clone --recursive https://github.com/xforce/eve-echoes-tools.git /opt/eve-echoes-tools
 
 ENTRYPOINT ["/opt/cmd.sh"]

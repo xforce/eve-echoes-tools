@@ -12,6 +12,7 @@ import importlib
 import imp
 import inspect
 import contextlib
+from multiprocessing import Pool
 
 parser = argparse.ArgumentParser(
     description='Dump all the static data out of the Eve Echoes XAPK')
@@ -54,6 +55,51 @@ def execute_stdout(argv, env=os.environ):
 # In some way at least, maybe strip it down a bit idk
 
 
+def dump_script(filename, script_extract_dir):
+    if not filename.endswith(".nxs"):
+        return
+    script_redirect_out = execute_stdout(["python2", "neox-tools/scripts/script_redirect.py", os.path.join(script_extract_dir, "script",
+                                                                                                           filename)])
+    c_pyc_file = tempfile.NamedTemporaryFile(
+        mode="wb", delete=False)
+    c_pyc_file.write(script_redirect_out)
+    c_pyc_file.close()
+    pyc_script_file = tempfile.NamedTemporaryFile(
+        mode="wb", delete=False, suffix=".pyc")
+    pyc_script_file.close()
+    execute(["python2", "neox-tools/scripts/pyc_decryptor.py",
+             c_pyc_file.name, pyc_script_file.name])
+    os.remove(c_pyc_file.name)
+    with tempfile.NamedTemporaryFile(mode="wb", delete=False) as py_file:
+        meow = execute(["python2", "neox-tools/scripts/decompile_pyc.py",
+                        "-o", py_file.name, pyc_script_file.name])
+        os.remove(pyc_script_file.name)
+        py_file.close()
+        if meow == 0:
+            # Yay
+            py_file = open(py_file.name)
+            py_file.seek(0)
+            lines = py_file.readlines()
+            py_file.close()
+            if lines[4].startswith("# Embedded file name:"):
+                filename = lines[4].replace(
+                    "# Embedded file name: ", "")
+                filename = filename.replace("\\", "/")
+                filename = filename.replace("\n", "")
+                print(filename)
+                filedir = os.path.join(
+                    args.outdir, "script", os.path.dirname(filename))
+                if not os.path.exists(filedir):
+                    os.makedirs(filedir)
+                shutil.copy(py_file.name, os.path.join(
+                    args.outdir, "script", filename))
+        os.remove(py_file.name)
+
+
+def dump_script_unpack(args):
+    return dump_script(*args)
+
+
 def dump_scripts(apk):
     with tempdir() as apk_temp_dir:
         # Script stuff
@@ -63,45 +109,11 @@ def dump_scripts(apk):
         with tempdir() as script_extract_dir:
             execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
                      "--", "x", script_npk, script_extract_dir])
+            pool = Pool()
+            files = []
             for filename in os.listdir(os.path.join(script_extract_dir, "script")):
-                if not filename.endswith(".nxs"):
-                    continue
-                script_redirect_out = execute_stdout(["python2", "neox-tools/scripts/script_redirect.py", os.path.join(script_extract_dir, "script",
-                                                                                                                       filename)])
-                c_pyc_file = tempfile.NamedTemporaryFile(
-                    mode="wb", delete=False)
-                c_pyc_file.write(script_redirect_out)
-                c_pyc_file.close()
-                pyc_script_file = tempfile.NamedTemporaryFile(
-                    mode="wb", delete=False, suffix=".pyc")
-                pyc_script_file.close()
-                execute(["python2", "neox-tools/scripts/pyc_decryptor.py",
-                         c_pyc_file.name, pyc_script_file.name])
-                os.remove(c_pyc_file.name)
-                with tempfile.NamedTemporaryFile(mode="wb", delete=False) as py_file:
-                    meow = execute(["python2", "neox-tools/scripts/decompile_pyc.py",
-                                    "-o", py_file.name, pyc_script_file.name])
-                    os.remove(pyc_script_file.name)
-                    py_file.close()
-                    if meow == 0:
-                        # Yay
-                        py_file = open(py_file.name)
-                        py_file.seek(0)
-                        lines = py_file.readlines()
-                        py_file.close()
-                        if lines[4].startswith("# Embedded file name:"):
-                            filename = lines[4].replace(
-                                "# Embedded file name: ", "")
-                            filename = filename.replace("\\", "/")
-                            filename = filename.replace("\n", "")
-                            print(filename)
-                            filedir = os.path.join(
-                                args.outdir, "script", os.path.dirname(filename))
-                            if not os.path.exists(filedir):
-                                os.makedirs(filedir)
-                            shutil.copy(py_file.name, os.path.join(
-                                args.outdir, "script", filename))
-                    os.remove(py_file.name)
+                files.append((filename, script_extract_dir))
+            pool.map(dump_script_unpack, files)
 
 
 def dump_static_data_fsd(xapk_temp_dir):

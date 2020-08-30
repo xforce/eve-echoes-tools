@@ -5,7 +5,7 @@ Eve Echoes Tools
 [![GitHub](https://img.shields.io/github/license/xforce/eve-echoes-tools?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Discord](https://img.shields.io/discord/747940644378640425?style=for-the-badge)](https://discord.gg/XZsxXCN)
 [![GitHub language count](https://img.shields.io/github/languages/count/xforce/eve-echoes-tools?style=for-the-badge)]()
-[![Data Download](https://img.shields.io/badge/Data-v1.5.5-yellow?style=for-the-badge)](http://eve-echoes-data.s3-website.eu-central-1.amazonaws.com/v1.5.5/)
+[![Data Download](https://img.shields.io/badge/Data-v1.5.6-yellow?style=for-the-badge)](http://eve-echoes-data.s3-website.eu-central-1.amazonaws.com/v1.5.6/)
 
 A collection of tools to convert, extract and modify the game files of Eve Echoes.
 

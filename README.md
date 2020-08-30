@@ -34,7 +34,7 @@ Alternatively all the static data is provided for your convience in the followin
 [Browsable version from the web](http://eve-echoes-data.s3-website.eu-central-1.amazonaws.com/)
 
 [Direct S3 Link](https://s3-eu-central-1.amazonaws.com/eve-echoes-data)
-> The S3 Bucket was last updated on 08/25/20 with v1.5.5 data
+> The S3 Bucket was last updated on 08/29/20 with v1.5.6 data
 <br />
 <br />
 

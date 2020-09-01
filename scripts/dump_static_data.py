@@ -75,24 +75,26 @@ def dump_script(filename, script_extract_dir):
                         "-o", py_file.name, pyc_script_file.name])
         os.remove(pyc_script_file.name)
         py_file.close()
-        if meow == 0:
-            # Yay
-            py_file = open(py_file.name)
-            py_file.seek(0)
-            lines = py_file.readlines()
-            py_file.close()
-            if lines[4].startswith("# Embedded file name:"):
-                filename = lines[4].replace(
-                    "# Embedded file name: ", "")
-                filename = filename.replace("\\", "/")
-                filename = filename.replace("\n", "")
-                print(filename)
-                filedir = os.path.join(
-                    args.outdir, "script", os.path.dirname(filename))
-                if not os.path.exists(filedir):
-                    os.makedirs(filedir)
-                shutil.copy(py_file.name, os.path.join(
-                    args.outdir, "script", filename))
+        # Yay
+        py_file = open(py_file.name)
+        py_file.seek(0)
+        lines = py_file.readlines()
+        py_file.close()
+        if len(lines) > 4 and lines[4].startswith("# Embedded file name:"):
+            filename = lines[4].replace(
+                "# Embedded file name: ", "")
+            filename = filename.replace("\\", "/")
+            filename = filename.replace("\n", "")
+            print(filename)
+            filedir = os.path.join(
+                args.outdir, "script", os.path.dirname(filename))
+            if not os.path.exists(filedir):
+                os.makedirs(filedir)
+            shutil.copy(py_file.name, os.path.join(
+                args.outdir, "script", filename))
+        else:
+            # TODO(alexander): Move to scripts_failed dir?
+            pass
         os.remove(py_file.name)
 
 

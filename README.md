@@ -29,15 +29,6 @@ Now you should have all the static data for Eve Echoes ready to use in `staticda
 
 <br />
 
-Alternatively all the static data is provided for your convience in the following S3 Bucket.
-
-[Browsable version from the web](http://eve-echoes-data.s3-website.eu-central-1.amazonaws.com/)
-
-[Direct S3 Link](https://s3-eu-central-1.amazonaws.com/eve-echoes-data)
-> The S3 Bucket was last updated on 08/29/20 with v1.5.6 data
-<br />
-<br />
-
 ## [FSD2JSON](fsd2json)
 
 A simple tool to convert the static data fsd files to json, making it easy to inspect and play with.

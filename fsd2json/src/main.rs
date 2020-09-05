@@ -1,15 +1,38 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::{App, Arg};
 use log::{debug, info, trace};
+use num_traits::ToPrimitive;
 use std::fmt;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
+
+fn try_convert_big_int_to_i64(bi: &num_bigint::BigInt) -> i64 {
+    if bi.bits() > 64 {
+        panic!("Integer too large")
+    }
+    if let Some(i) = bi.to_i64() {
+        i
+    } else {
+        bi.to_u64()
+            .and_then(|n| {
+                let m: u64 = 1 << 63;
+                if n < m {
+                    Some(-(n as i64))
+                } else if n == m {
+                    Some(i64::MIN)
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    }
+}
 
 fn pickle_to_json(v: &serde_pickle::Value) -> serde_json::Value {
     match v {
         serde_pickle::Value::Bool(v) => (*v).into(),
         serde_pickle::Value::I64(v) => (*v).into(),
-        serde_pickle::Value::Int(_) => panic!("BigInt not supported"),
+        serde_pickle::Value::Int(v) => try_convert_big_int_to_i64(v).into(),
         serde_pickle::Value::F64(v) => (*v).into(),
         serde_pickle::Value::Bytes(v) => std::str::from_utf8(v).unwrap().into(),
         serde_pickle::Value::String(v) => (*v).clone().into(),
@@ -551,7 +574,7 @@ impl FsdValue {
                         let optional_attributes_field = buffer.read_u64::<LittleEndian>().unwrap();
                         for (_, (k, v)) in optional_value_lookups.iter().enumerate() {
                             //
-                            let i = v.as_u64().unwrap();
+                            let i = v.as_i64().unwrap();
                             if optional_attributes_field & i as u64 == 0 {
                                 offset_attributes.retain(|x| x != k);
                             }
@@ -875,7 +898,8 @@ fn main() -> Result<(), FsdDecodeError> {
         let schema_size = reader.read_u32::<LittleEndian>()?;
         let mut buffer = vec![0; schema_size as usize];
         reader.read_exact(&mut buffer)?;
-        let schema = pickle_to_json(&serde_pickle::from_slice(&buffer).unwrap());
+        let pickle = serde_pickle::from_slice(&buffer).unwrap();
+        let schema = pickle_to_json(&pickle);
         schema
     };
     trace!("{}", schema);

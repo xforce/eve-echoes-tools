@@ -110,10 +110,10 @@ def dump_scripts(apk):
             script_npk = os.path.join(apk_temp_dir, "assets", "script.npk")
         with tempdir() as script_extract_dir:
             execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
-                     "--", "x", script_npk, script_extract_dir])
+                     "--", "x", '-d', script_extract_dir, script_npk])
             pool = Pool()
             files = []
-            for filename in os.listdir(os.path.join(script_extract_dir, "script")):
+            for filename in os.listdir(os.path.join(script_extract_dir)):
                 files.append((filename, script_extract_dir))
             pool.map(dump_script_unpack, files)
 

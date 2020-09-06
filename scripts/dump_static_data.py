@@ -58,7 +58,7 @@ def execute_stdout(argv, env=os.environ):
 def dump_script(filename, script_extract_dir):
     if not filename.endswith(".nxs"):
         return
-    script_redirect_out = execute_stdout(["python2", "neox-tools/scripts/script_redirect.py", os.path.join(script_extract_dir, "script",
+    script_redirect_out = execute_stdout(["python2", "neox-tools/scripts/script_redirect.py", os.path.join(script_extract_dir,
                                                                                                            filename)])
     c_pyc_file = tempfile.NamedTemporaryFile(
         mode="wb", delete=False)
@@ -71,11 +71,10 @@ def dump_script(filename, script_extract_dir):
              c_pyc_file.name, pyc_script_file.name])
     os.remove(c_pyc_file.name)
     with tempfile.NamedTemporaryFile(mode="wb", delete=False) as py_file:
-        meow = execute(["python2", "neox-tools/scripts/decompile_pyc.py",
-                        "-o", py_file.name, pyc_script_file.name])
+        execute(["python2", "neox-tools/scripts/decompile_pyc.py",
+                 "-o", py_file.name, pyc_script_file.name])
         os.remove(pyc_script_file.name)
         py_file.close()
-        # Yay
         py_file = open(py_file.name)
         py_file.seek(0)
         lines = py_file.readlines()
@@ -113,8 +112,9 @@ def dump_scripts(apk):
                      "--", "x", '-d', script_extract_dir, script_npk])
             pool = Pool()
             files = []
-            for filename in os.listdir(os.path.join(script_extract_dir)):
-                files.append((filename, script_extract_dir))
+            for root, dirnames, filenames in os.walk(script_extract_dir):
+                for filename in filenames:
+                    files.append((filename, root))
             pool.map(dump_script_unpack, files)
 
 

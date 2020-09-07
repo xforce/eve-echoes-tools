@@ -12,7 +12,7 @@ import importlib
 import imp
 import inspect
 import contextlib
-from multiprocessing import Pool
+from multiprocessing import Pool, Lock
 
 parser = argparse.ArgumentParser(
     description='Dump all the static data out of the Eve Echoes XAPK')
@@ -55,6 +55,11 @@ def execute_stdout(argv, env=os.environ):
 # In some way at least, maybe strip it down a bit idk
 
 
+def init(l):
+    global lock
+    lock = l
+
+
 def dump_script(filename, script_extract_dir):
     if not filename.endswith(".nxs"):
         return
@@ -87,8 +92,13 @@ def dump_script(filename, script_extract_dir):
             print(filename)
             filedir = os.path.join(
                 args.outdir, "script", os.path.dirname(filename))
-            if not os.path.exists(filedir):
-                os.makedirs(filedir)
+            try:
+                lock.acquire()
+                if not os.path.exists(filedir):
+                    os.makedirs(filedir)
+            finally:
+                lock.release()
+
             shutil.copy(py_file.name, os.path.join(
                 args.outdir, "script", filename))
         else:
@@ -110,7 +120,8 @@ def dump_scripts(apk):
         with tempdir() as script_extract_dir:
             execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
                      "--", "x", '-d', script_extract_dir, script_npk])
-            pool = Pool()
+            lock = Lock()
+            pool = Pool(initializer=init, initargs=(lock,))
             files = []
             for root, dirnames, filenames in os.walk(script_extract_dir):
                 for filename in filenames:

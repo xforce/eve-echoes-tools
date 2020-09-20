@@ -89,7 +89,6 @@ def dump_script(filename, script_extract_dir):
                 "# Embedded file name: ", "")
             filename = filename.replace("\\", "/")
             filename = filename.replace("\n", "")
-            print(filename)
             filedir = os.path.join(
                 args.outdir, "script", os.path.dirname(filename))
             try:
@@ -121,12 +120,16 @@ def dump_scripts(apk):
             execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
                      "--", "x", '-d', script_extract_dir, script_npk])
             lock = Lock()
-            pool = Pool(initializer=init, initargs=(lock,))
+            import multiprocessing
+            pool = Pool(int(multiprocessing.cpu_count() * 1.5),
+                        initializer=init, initargs=(lock,))
             files = []
             for root, dirnames, filenames in os.walk(script_extract_dir):
                 for filename in filenames:
                     files.append((filename, root))
-            pool.map(dump_script_unpack, files)
+            import random
+            random.shuffle(files)
+            pool.map_async(dump_script_unpack, files).get(9999999)
 
 
 def dump_static_data_fsd(xapk_temp_dir):
@@ -208,8 +211,10 @@ with tempdir() as xapk_temp_dir:
     with zipfile.ZipFile(args.apk, 'r') as zip_ref:
         zip_ref.extractall(xapk_temp_dir)
 
-        apk = os.path.join(xapk_temp_dir, "com.netease.eve.en.apk")
-        dump_scripts(apk)
+        for filename in os.listdir(xapk_temp_dir):
+            if filename.endswith(".apk"):
+                apk = os.path.join(xapk_temp_dir, filename)
+                dump_scripts(apk)
 
         # Static Data stuff
         dump_static_data_fsd(xapk_temp_dir)

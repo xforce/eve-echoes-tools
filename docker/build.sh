@@ -1,2 +1,2 @@
 #!/bin/bash
-docker build . -t evee-tools
+( cd .. && docker build -f docker/Dockerfile -t evee-tools . )

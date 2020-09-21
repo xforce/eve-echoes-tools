@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import mmh3
 import argparse
 import json

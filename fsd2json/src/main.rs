@@ -871,13 +871,13 @@ fn main() -> Result<(), FsdDecodeError> {
         .version("1.0")
         .author("Alexander Guettler <alexander@guettler.io>")
         .arg(
-            Arg::with_name("OUT")
+            Arg::new("OUT")
                 .short('o')
                 .about("Output directory for the resulting .json file")
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("INPUT")
+            Arg::new("INPUT")
                 .about("The FSD file to be converted to json")
                 .required(true)
                 .takes_value(true)

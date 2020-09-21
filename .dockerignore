@@ -1,0 +1,5 @@
+target/
+.ccls-cache/
+.git/
+staticdata/
+neox-tools/target/

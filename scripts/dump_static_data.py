@@ -95,12 +95,35 @@ def dump_script(filename, script_extract_dir):
     pyc_script_file = tempfile.NamedTemporaryFile(
         mode="wb", delete=False, suffix=".pyc")
     pyc_script_file.close()
-    execute([sys.executable, "neox-tools/scripts/pyc_decryptor.py",
-             c_pyc_file.name, pyc_script_file.name])
+    if execute([sys.executable, "neox-tools/scripts/pyc_decryptor.py",
+                c_pyc_file.name, pyc_script_file.name]) != 0:
+        from shutil import copyfile
+        filedir = os.path.join(
+            args.outdir, "failed", os.path.dirname(filename))
+        try:
+            lock.acquire()
+            if not os.path.exists(filedir):
+                os.makedirs(filedir)
+        finally:
+            lock.release()
+        copyfile(c_pyc_file.name, os.path.join(
+            args.outdir, "failed", filename))
+
     os.remove(c_pyc_file.name)
     with tempfile.NamedTemporaryFile(mode="wb", delete=False) as py_file:
-        execute([sys.executable, "neox-tools/scripts/decompile_pyc.py",
-                 "-o", py_file.name, pyc_script_file.name])
+        if execute([sys.executable, "neox-tools/scripts/decompile_pyc.py",
+                    "-o", py_file.name, pyc_script_file.name]) != 0:
+            from shutil import copyfile
+            filedir = os.path.join(
+                args.outdir, "failed", os.path.dirname(filename))
+            try:
+                lock.acquire()
+                if not os.path.exists(filedir):
+                    os.makedirs(filedir)
+            finally:
+                lock.release()
+            copyfile(pyc_script_file.name, os.path.join(
+                args.outdir, "failed", filename + ".pyc"))
         os.remove(pyc_script_file.name)
         py_file.close()
         py_file = open(py_file.name)
@@ -172,8 +195,6 @@ def dump_static_data_fsd(xapk_temp_dir):
     for root, dirnames, filenames in os.walk(static_data_dir):
         for filename in fnmatch.filter(filenames, '*.sd'):
             dir = os.path.relpath(root, static_data_dir)
-            print(dir)
-            # print(os.path.dirname(filename))
             sd_json_dir = os.path.join(args.outdir, "staticdata", dir)
             if not os.path.exists(sd_json_dir):
                 os.makedirs(sd_json_dir)
@@ -280,11 +301,13 @@ def extract_data_from_python(filename, directory, sub):
 
             # TODO(alexander): If we only have a single data 'child' flatten?
             with io.open(out_file, "w", encoding="utf-8") as f:
-                j = json.dumps(
-                    out_data, ensure_ascii=False, indent=4, encoding='utf8')
                 if not PYTHON3:
+                    j = json.dumps(
+                        out_data, ensure_ascii=False, indent=4, encoding='utf8')
                     f.write(unicode(j))
                 else:
+                    j = json.dumps(
+                        out_data, ensure_ascii=False, indent=4)
                     f.write(j)
 
         except (NameError, SyntaxError, SystemError, ImportError, RuntimeError) as e:

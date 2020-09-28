@@ -1,6 +1,6 @@
 FROM alpine:edge as cargo-build
 
-RUN apk add -X http://dl-cdn.alpinelinux.org/alpine/edge/testing rust rustup cargo
+RUN apk add -X http://dl-cdn.alpinelinux.org/alpine/edge/testing rust cargo
 
 WORKDIR /app
 ADD Cargo.toml Cargo.toml

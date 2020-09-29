@@ -4,7 +4,7 @@ RUN apk add -X http://dl-cdn.alpinelinux.org/alpine/edge/testing rust cargo
 
 WORKDIR /app
 ADD Cargo.toml Cargo.toml
-ADD Cargo.lock Cargo.lock
+# ADD Cargo.lock Cargo.lock
 ADD fsd2json/src /app/fsd2json/src
 ADD fsd2json/Cargo.toml /app/fsd2json/Cargo.toml
 

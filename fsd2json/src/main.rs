@@ -865,7 +865,10 @@ impl FsdValue {
 }
 
 fn main() -> Result<(), FsdDecodeError> {
-    simple_logger::init_with_level(log::Level::Info).unwrap();
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Info)
+        .init()
+        .unwrap();
 
     let matches = App::new("FSD to JSON")
         .version("1.0")

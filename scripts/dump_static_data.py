@@ -18,6 +18,18 @@ from multiprocessing import Pool, Lock
 PYTHON3 = sys.version_info >= (3, 0)
 
 
+def error(msg):
+    prefix = '\033[1m\033[31mERROR\033[0m' if os.isatty(1) else 'ERROR'
+    print('%s: %s' % (prefix, msg))
+    sys.exit(1)
+
+
+def warn(msg):
+    warn.warned = True
+    prefix = '\033[1m\033[93mWARNING\033[0m' if os.isatty(1) else 'WARNING'
+    print('%s: %s' % (prefix, msg))
+
+
 def which(program):
     import os
 
@@ -65,13 +77,14 @@ def execute(argv, env=os.environ):
         return e.returncode
 
 
-def execute_stdout(argv, env=os.environ):
+def execute_stdout(argv, no_output=False, env=os.environ):
     try:
         output = subprocess.check_output(
             argv, stderr=subprocess.STDOUT, env=env)
         return output
     except subprocess.CalledProcessError as e:
-        print(e.output)
+        if not no_output:
+            print(e.output)
         raise e
 
 # TODO(alexander): Move this to neox-tools
@@ -85,9 +98,17 @@ def init(l):
 
 def dump_script(filename, script_extract_dir):
     if not filename.endswith(".nxs"):
-        return
-    script_redirect_out = execute_stdout([sys.executable, "neox-tools/scripts/script_redirect.py", os.path.join(script_extract_dir,
-                                                                                                                filename)])
+        return True
+
+    try:
+        script_redirect_out = execute_stdout([sys.executable, "neox-tools/scripts/script_redirect.py", os.path.join(script_extract_dir,
+                                                                                                                    filename)], True)
+    except subprocess.CalledProcessError as e:
+        if e.returncode >= 132:
+            return False
+        else:
+            return True
+
     c_pyc_file = tempfile.NamedTemporaryFile(
         mode="wb", delete=False)
     c_pyc_file.write(script_redirect_out)
@@ -125,11 +146,13 @@ def dump_script(filename, script_extract_dir):
             copyfile(pyc_script_file.name, os.path.join(
                 args.outdir, "failed", filename + ".pyc"))
         os.remove(pyc_script_file.name)
+
         py_file.close()
         py_file = open(py_file.name)
         py_file.seek(0)
         lines = py_file.readlines()
         py_file.close()
+
         # TODO(alexander): Argh
         if len(lines) > 5 and lines[5].startswith("# Embedded file name:"):
             print(filename, pyc_script_file.name)
@@ -153,6 +176,8 @@ def dump_script(filename, script_extract_dir):
             pass
         os.remove(py_file.name)
 
+    return True
+
 
 def dump_script_unpack(args):
     return dump_script(*args)
@@ -170,17 +195,37 @@ def dump_scripts(apk):
             else:
                 execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
                          "--", "x", '-d', script_extract_dir, script_npk])
-            lock = Lock()
-            import multiprocessing
-            pool = Pool(int(multiprocessing.cpu_count()),
-                        initializer=init, initargs=(lock,))
+
+            # Prepare data for parallel execution
             files = []
             for root, dirnames, filenames in os.walk(script_extract_dir):
                 for filename in filenames:
                     files.append((filename, root))
+
+            # Attempt to distribute larger files over more executors
+            # in testing this does slightly improve things
             import random
             random.shuffle(files)
-            pool.map_async(dump_script_unpack, files).get(9999999)
+
+            # Create pool for parallel execution
+            # The lock here is used to synchronize directory create calls
+            lock = Lock()
+            import multiprocessing
+            pool = Pool(int(multiprocessing.cpu_count()),
+                        initializer=init, initargs=(lock,))
+
+            if len(files) > 0:
+                # Make sure we even have a compatible decrypt plugin available
+                # If we don't, just abort and tell the user such, nothing else we can do.
+                file = files[0]
+                init(lock)
+                if not dump_script_unpack(file):
+                    warn(
+                        "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
+                    return
+
+                files = files[1:]
+                pool.map_async(dump_script_unpack, files).get(9999999)
 
 
 def dump_static_data_fsd(xapk_temp_dir):
@@ -189,9 +234,12 @@ def dump_static_data_fsd(xapk_temp_dir):
     for filename in os.listdir(obb_path):
         with zipfile.ZipFile(os.path.join(obb_path, filename), 'r') as obb_zip:
             obb_zip.extractall(obb_path)
+
+    # Path to staticdata inside xapk
     static_data_dir = os.path.join(
         xapk_temp_dir, "Android", "obb", "com.netease.eve.en", "res", "staticdata")
     static_data_dir = os.path.abspath(os.path.realpath(static_data_dir))
+
     for root, dirnames, filenames in os.walk(static_data_dir):
         for filename in fnmatch.filter(filenames, '*.sd'):
             dir = os.path.relpath(root, static_data_dir)
@@ -207,6 +255,11 @@ def dump_static_data_fsd(xapk_temp_dir):
 
 
 def transform_node(d):
+    """ 
+    This is doing some hack to convert things like lambdas in the dict to a JSON compatible representation.
+
+    For now just doing convert lambda code to string
+    """
     import parso
     if not hasattr(d, 'children'):
         return d
@@ -291,6 +344,8 @@ def extract_data_from_python(filename, directory, sub):
 
             if len(out_data.keys()) == 0:
                 return
+
+            # Generate output path for extracted python data
             import io
             out_file = os.path.join(args.outdir, "py_data", sub, directory, os.path.basename(
                 filename).replace(".py", ".json"))
@@ -310,8 +365,7 @@ def extract_data_from_python(filename, directory, sub):
                         out_data, ensure_ascii=False, indent=4)
                     f.write(j)
 
-        except (NameError, SyntaxError, SystemError, ImportError, RuntimeError) as e:
-            print(e)
+        except (NameError, SyntaxError, SystemError, ImportError, RuntimeError):
             print("Failed to convert %s" % filename)
             raise
 

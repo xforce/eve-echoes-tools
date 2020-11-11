@@ -13,6 +13,8 @@ import inspect
 import contextlib
 import parso
 import sys
+import zlib
+import collections
 from multiprocessing import Pool, Lock
 
 PYTHON3 = sys.version_info >= (3, 0)
@@ -55,6 +57,8 @@ parser.add_argument('apk', type=str, action='store',
                     help="APK File to extract static data from")
 parser.add_argument('outdir', type=str, action='store',
                     help="Target directory to extract the static data to")
+parser.add_argument('--patch', type=str, action='store',
+                    help="Patch directory to use")
 
 args = parser.parse_args()
 
@@ -65,8 +69,12 @@ def tempdir():
 
     def cleanup():
         shutil.rmtree(dirpath)
-    yield dirpath
-    cleanup()
+    try:
+        yield dirpath
+    except Exception as e:
+        raise e
+    finally:
+        cleanup()
 
 
 def execute(argv, env=os.environ):
@@ -235,6 +243,21 @@ def dump_static_data_fsd(xapk_temp_dir):
         with zipfile.ZipFile(os.path.join(obb_path, filename), 'r') as obb_zip:
             obb_zip.extractall(obb_path)
 
+    filelist = None
+    if args.patch is not None:
+        with open(os.path.join(args.patch, "0", "1", "2081783950193513057"), "rb") as f:
+            compressed_filelist = f.read()
+        filelist = zlib.decompress(compressed_filelist)
+        if type(filelist) is not str:
+            filelist = filelist.decode('utf-8')
+        m = collections.OrderedDict()
+        for line in filelist.splitlines():
+            info = line.split('\t')
+            hash = info[0]
+            path = str(info[5])
+            m[hash] = path
+        filelist = m
+
     # Path to staticdata inside xapk
     static_data_dir = os.path.join(
         xapk_temp_dir, "Android", "obb", "com.netease.eve.en", "res", "staticdata")
@@ -242,20 +265,35 @@ def dump_static_data_fsd(xapk_temp_dir):
 
     for root, dirnames, filenames in os.walk(static_data_dir):
         for filename in fnmatch.filter(filenames, '*.sd'):
+            # if not filename.endswith("48.sd"):
+            #     continue
             dir = os.path.relpath(root, static_data_dir)
             sd_json_dir = os.path.join(args.outdir, "staticdata", dir)
             if not os.path.exists(sd_json_dir):
                 os.makedirs(sd_json_dir)
-            if which("fsd2json") is not None:
-                execute(["fsd2json", "-o", sd_json_dir,
-                         os.path.join(root, filename)])
-            else:
-                execute(["cargo", "run", "--release", "--bin",
-                         "fsd2json", "--", "-o", sd_json_dir, os.path.join(root, filename)])
+
+            sd_file_name = os.path.join(root, filename)
+            if args.patch is not None:
+                top = mmh3.hash(os.path.join("staticdata", dir,
+                                             filename).replace("/", "\\"), 0x9747B28C)
+                bottom = mmh3.hash(os.path.join(
+                    "staticdata", dir, filename).replace("/", "\\"), 0xC82B7479)
+                hash = bottom | (top << 0x20)
+                f = os.path.join(args.patch, "0", "1", str(hash))
+                if os.path.exists(f):
+                    print("Copy patched file")
+                    # Copy the patched file over the original :)
+                    shutil.copy(f, sd_file_name)
+
+            # if which("fsd2json") is not None:
+            #     execute(["fsd2json", "-o", sd_json_dir, sd_file_name])
+            # else:
+            execute(["cargo", "run", "--bin",
+                     "fsd2json", "--", "-o", sd_json_dir, sd_file_name])
 
 
 def transform_node(d):
-    """ 
+    """
     This is doing some hack to convert things like lambdas in the dict to a JSON compatible representation.
 
     For now just doing convert lambda code to string
@@ -392,17 +430,17 @@ with tempdir() as xapk_temp_dir:
     with zipfile.ZipFile(args.apk, 'r') as zip_ref:
         zip_ref.extractall(xapk_temp_dir)
 
-        for filename in os.listdir(xapk_temp_dir):
-            if filename.endswith(".apk"):
-                apk = os.path.join(xapk_temp_dir, filename)
-                dump_scripts(apk)
+        # for filename in os.listdir(xapk_temp_dir):
+        #     if filename.endswith(".apk"):
+        #         apk = os.path.join(xapk_temp_dir, filename)
+        #         dump_scripts(apk)
 
         # Static Data stuff
         dump_static_data_fsd(xapk_temp_dir)
 
-        # Script data to json
-        convert_files(os.path.join(args.outdir, "script", "data"), "data")
-        convert_files(os.path.join(args.outdir, "script",
-                                   "data_common"), "data_common")
+        # # Script data to json
+        # convert_files(os.path.join(args.outdir, "script", "data"), "data")
+        # convert_files(os.path.join(args.outdir, "script",
+        #                            "data_common"), "data_common")
 
 # print(script_npk)

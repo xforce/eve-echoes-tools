@@ -3,9 +3,66 @@
 export PATH=$PATH:/opt/eve-echoes-tools/scripts
 export PATH="$HOME/.cargo/bin:$PATH"
 
-cd /opt/eve-echoes-tools
+OPTIND=1
+while getopts ":c:" opt; do
+  case ${opt} in
+    c )
+        # crypt_plugin="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+        crypt_plugin="${OPTARG}"
+        ;;
+   \? )
+     break
+     ;;
+  esac
+done
+shift $((OPTIND -1))
 
-if [ $1 == "dump_static" ]; then
-python3 scripts/dump_static_data.py $2 $3
+if [ ! -z "$patch_path" ]
+then
+cp $patch_path /opt/eve-echoes-tools/neox-tools/script_redirect_plug.py
 fi
 
+subcommand=$1; shift
+
+case "$subcommand" in
+  dump_static)
+    OPTIND=1
+    while getopts ":p-:" opt; do
+      case ${opt} in
+        - )
+         case "${OPTARG}" in
+            patch )
+                patch="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+         esac;;
+        p )
+          patch="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+          ;;
+        \? )
+          echo "Invalid Option: -$OPTARG" 1>&2
+          exit 1
+          ;;
+        : )
+          echo "Invalid Option: -$OPTARG requires an argument" 1>&2
+          exit 1
+          ;;
+      esac
+    done
+    patch_path=$patch
+    xapk_path="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+    out_dir="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+
+    echo $patch_path
+    echo $xapk_path
+    echo $out_dir
+
+    pushd /opt/eve-echoes-tools
+    if [ -z "$patch_path" ]
+    then 
+        python3 scripts/dump_static_data.py $xapk_path $out_dir
+    else
+        python3 scripts/dump_static_data.py --patch $patch_path $xapk_path $out_dir
+    fi
+    popd
+
+    ;;
+esac

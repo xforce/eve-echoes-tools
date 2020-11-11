@@ -430,17 +430,17 @@ with tempdir() as xapk_temp_dir:
     with zipfile.ZipFile(args.apk, 'r') as zip_ref:
         zip_ref.extractall(xapk_temp_dir)
 
-        # for filename in os.listdir(xapk_temp_dir):
-        #     if filename.endswith(".apk"):
-        #         apk = os.path.join(xapk_temp_dir, filename)
-        #         dump_scripts(apk)
+        for filename in os.listdir(xapk_temp_dir):
+            if filename.endswith(".apk"):
+                apk = os.path.join(xapk_temp_dir, filename)
+                dump_scripts(apk)
 
         # Static Data stuff
         dump_static_data_fsd(xapk_temp_dir)
 
-        # # Script data to json
-        # convert_files(os.path.join(args.outdir, "script", "data"), "data")
-        # convert_files(os.path.join(args.outdir, "script",
-        #                            "data_common"), "data_common")
+        # Script data to json
+        convert_files(os.path.join(args.outdir, "script", "data"), "data")
+        convert_files(os.path.join(args.outdir, "script",
+                                   "data_common"), "data_common")
 
 # print(script_npk)

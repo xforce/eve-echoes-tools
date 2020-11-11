@@ -285,10 +285,10 @@ def dump_static_data_fsd(xapk_temp_dir):
                     # Copy the patched file over the original :)
                     shutil.copy(f, sd_file_name)
 
-            # if which("fsd2json") is not None:
-            #     execute(["fsd2json", "-o", sd_json_dir, sd_file_name])
-            # else:
-            execute(["cargo", "run", "--bin",
+            if which("fsd2json") is not None:
+                execute(["fsd2json", "-o", sd_json_dir, sd_file_name])
+            else:
+                execute(["cargo", "run", "--bin",
                      "fsd2json", "--", "-o", sd_json_dir, sd_file_name])
 
 

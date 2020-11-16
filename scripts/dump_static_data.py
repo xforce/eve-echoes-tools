@@ -138,7 +138,7 @@ def patch_file_for_path(path):
     print("Looking up patch for file {}".format(path))
     if path in patch_file_list:
         patch_file = patch_file_list[path]
-        print("Patch file found for {} at {}".format(path, f0))
+        print("Patch file found for {} at {}".format(path, patch_file))
         return patch_file
 
     print("No patch for file {}".format(path))            

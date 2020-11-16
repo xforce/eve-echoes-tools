@@ -102,6 +102,50 @@ def execute_stdout(argv, no_output=False, env=os.environ):
             print(e.output)
         raise e
 
+### START of Patch file management
+
+patch_file_list = collections.OrderedDict()
+def process_patch_files(patch_file_dir):
+    with open(os.path.join(patch_file_dir, "0", "1", "2081783950193513057"), "rb") as f:
+        compressed_filelist = f.read()
+    filelist = zlib.decompress(compressed_filelist)
+    if type(filelist) is not str:
+        filelist = filelist.decode('utf-8')
+
+    m = collections.OrderedDict()
+    for line in filelist.splitlines():
+        info = line.split('\t')
+        patch_file = check_patch_file_exists(info[1])
+        filename = str(info[5])
+        
+        if patch_file is not None:
+            m[filename] = patch_file
+
+    global patch_file_list
+    patch_file_list = m
+
+def check_patch_file_exists(patch_file):
+    if patch_file is not None:
+        f0 = os.path.join(args.patch, "0", "0", str(patch_file))
+        f1 = os.path.join(args.patch, "0", "1", str(patch_file))
+        if os.path.exists(f0):
+            return f0
+        elif os.path.exists(f1):
+            return f1
+    return None
+
+def patch_file_for_path(path):
+    print("Looking up patch for file {}".format(path))
+    if path in patch_file_list:
+        patch_file = patch_file_list[path]
+        print("Patch file found for {} at {}".format(path, f0))
+        return patch_file
+
+    print("No patch for file {}".format(path))            
+    return None
+
+### END of Patch file management
+
 # TODO(alexander): Move this to neox-tools
 # In some way at least, maybe strip it down a bit idk
 
@@ -254,43 +298,6 @@ def dump_scripts(apk):
 
                 files = files[1:]
                 pool.map_async(dump_script_unpack, files).get(9999999)
-
-
-patch_file_list = collections.OrderedDict()
-def process_patch_files(patch_file_dir):
-    with open(os.path.join(patch_file_dir, "0", "1", "2081783950193513057"), "rb") as f:
-        compressed_filelist = f.read()
-    filelist = zlib.decompress(compressed_filelist)
-    if type(filelist) is not str:
-        filelist = filelist.decode('utf-8')
-    print("Path Filelist:\n{}\n".format(filelist))
-    m = collections.OrderedDict()
-    global patch_file_list
-    for line in filelist.splitlines():
-        info = line.split('\t')
-        patchfile = info[1]
-        filename = str(info[5])
-        m[filename] = patchfile
-    patch_file_list = m
-
-def patch_file_for_path(path):
-    print("Looking for patch for file {}".format(path))
-    if path in patch_file_list:
-        patch_file = patch_file_list[path]
-
-        if patch_file is not None:
-            f0 = os.path.join(args.patch, "0", "0", str(patch_file))
-            f1 = os.path.join(args.patch, "0", "1", str(patch_file))
-            if os.path.exists(f0):
-                print("Patch file found for {} at {}".format(path, f0))
-                return f0
-            elif os.path.exists(f1):
-                print("Patch file found for {} at {}".format(path, f1))
-                return f1
-
-    print("No patch for file {}".format(path))            
-    return None
-
 
 def dump_static_data_fsd(xapk_temp_dir):
     obb_path = os.path.join(xapk_temp_dir, "Android",

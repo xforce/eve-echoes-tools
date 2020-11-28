@@ -109,12 +109,14 @@ patch_file_list = collections.OrderedDict()
 
 
 def process_patch_files(patch_file_dir):
+    print("Locating patch index file...")
     with open(os.path.join(patch_file_dir, "0", "1", "2081783950193513057"), "rb") as f:
         compressed_filelist = f.read()
     filelist = zlib.decompress(compressed_filelist)
     if type(filelist) is not str:
         filelist = filelist.decode('utf-8')
 
+    print("Parsing patch files for existence...")
     m = collections.OrderedDict()
     for line in filelist.splitlines():
         info = line.split('\t')
@@ -126,6 +128,8 @@ def process_patch_files(patch_file_dir):
 
     global patch_file_list
     patch_file_list = m
+    
+    print("Patch files loaded :)")
 
 
 def check_patch_file_exists(patch_file):

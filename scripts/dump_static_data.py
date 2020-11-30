@@ -22,9 +22,9 @@ PYTHON3 = sys.version_info >= (3, 0)
 
 class SetEncoder(json.JSONEncoder):
     def default(self, obj):
-       if isinstance(obj, set):
-          return list(obj)
-       return json.JSONEncoder.default(self, obj)
+        if isinstance(obj, set):
+            return list(obj)
+        return json.JSONEncoder.default(self, obj)
 
 
 def error(msg):
@@ -102,9 +102,12 @@ def execute_stdout(argv, no_output=False, env=os.environ):
             print(e.output)
         raise e
 
-### START of Patch file management
+# START of Patch file management
+
 
 patch_file_list = collections.OrderedDict()
+
+
 def process_patch_files(patch_file_dir):
     with open(os.path.join(patch_file_dir, "0", "1", "2081783950193513057"), "rb") as f:
         compressed_filelist = f.read()
@@ -117,12 +120,13 @@ def process_patch_files(patch_file_dir):
         info = line.split('\t')
         patch_file = check_patch_file_exists(info[1])
         filename = str(info[5])
-        
+
         if patch_file is not None:
             m[filename] = patch_file
 
     global patch_file_list
     patch_file_list = m
+
 
 def check_patch_file_exists(patch_file):
     if patch_file is not None:
@@ -134,6 +138,7 @@ def check_patch_file_exists(patch_file):
             return f1
     return None
 
+
 def patch_file_for_path(path):
     print("Looking up patch for file {}".format(path))
     if path in patch_file_list:
@@ -141,10 +146,10 @@ def patch_file_for_path(path):
         print("Patch file found for {} at {}".format(path, patch_file))
         return patch_file
 
-    print("No patch for file {}".format(path))            
+    print("No patch for file {}".format(path))
     return None
 
-### END of Patch file management
+# END of Patch file management
 
 # TODO(alexander): Move this to neox-tools
 # In some way at least, maybe strip it down a bit idk
@@ -166,7 +171,8 @@ def dump_script(filename, script_extract_dir, is_patch=False):
         else:
             file_path = os.path.join(script_extract_dir, filename)
 
-        script_redirect_out = execute_stdout([sys.executable, "neox-tools/scripts/script_redirect.py", file_path], True)
+        script_redirect_out = execute_stdout(
+            [sys.executable, "neox-tools/scripts/script_redirect.py", file_path], True)
     except subprocess.CalledProcessError as e:
         if e.returncode >= 132:
             return False
@@ -239,7 +245,7 @@ def dump_script(filename, script_extract_dir, is_patch=False):
             if is_patch == False and patch_filename is not None:
                 print("Ignoring file in favor of patch, processing...")
                 dump_script(patch_filename, script_extract_dir, True)
-            else: 
+            else:
                 print("Writing final script to {}".format(filename))
                 shutil.copy(py_file.name, os.path.join(
                     args.outdir, "script", filename))
@@ -299,6 +305,7 @@ def dump_scripts(apk):
                 files = files[1:]
                 pool.map_async(dump_script_unpack, files).get(9999999)
 
+
 def dump_static_data_fsd(xapk_temp_dir):
     obb_path = os.path.join(xapk_temp_dir, "Android",
                             "obb", "com.netease.eve.en")
@@ -326,7 +333,8 @@ def dump_static_data_fsd(xapk_temp_dir):
                 patch_file = patch_file_for_path(hash_source)
 
                 if patch_file is not None:
-                    print("Copying patch file {} to {}".format(patch_file, sd_file_name))
+                    print("Copying patch file {} to {}".format(
+                        patch_file, sd_file_name))
                     # Copy the patched file over the original :)
                     shutil.copy(patch_file, sd_file_name)
 
@@ -334,7 +342,7 @@ def dump_static_data_fsd(xapk_temp_dir):
                 execute(["fsd2json", "-o", sd_json_dir, sd_file_name])
             else:
                 execute(["cargo", "run", "--bin",
-                     "fsd2json", "--", "-o", sd_json_dir, sd_file_name])
+                         "fsd2json", "--", "-o", sd_json_dir, sd_file_name])
 
 
 def transform_node(d):
@@ -434,8 +442,12 @@ def extract_data_from_python(filename, directory, sub):
                 filename).replace(".py", ".json"))
 
             out_dir = os.path.dirname(out_file)
-            if not os.path.exists(out_dir):
-                os.makedirs(out_dir)
+            try:
+                lock.acquire()
+                if not os.path.exists(out_dir):
+                    os.makedirs(out_dir)
+            finally:
+                lock.release()
 
             # TODO(alexander): If we only have a single data 'child' flatten?
             with io.open(out_file, "w", encoding="utf-8") as f:
@@ -467,7 +479,11 @@ def convert_files(root_dir, sub):
             filename = os.path.join(root_dir, filename)
             files.append((filename, directory, sub))
 
-    pool = Pool()
+    lock = Lock()
+    import multiprocessing
+    pool = Pool(int(multiprocessing.cpu_count()),
+                initializer=init, initargs=(lock,))
+    init(lock)
     pool.map_async(extract_data_from_python_unpack, files).get(9999999)
 
 
@@ -475,7 +491,7 @@ with tempdir() as xapk_temp_dir:
 
     if args.patch is not None:
         process_patch_files(args.patch)
-        
+
     with zipfile.ZipFile(args.apk, 'r') as zip_ref:
         zip_ref.extractall(xapk_temp_dir)
 

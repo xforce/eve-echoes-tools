@@ -1,4 +1,4 @@
-#!/bin/ash
+#!/bin/bash
 
 export PATH=$PATH:/opt/eve-echoes-tools/scripts
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -17,9 +17,9 @@ while getopts ":c:" opt; do
 done
 shift $((OPTIND -1))
 
-if [ ! -z "$patch_path" ]
+if [ ! -z "$crypt_plugin" ]
 then
-cp $patch_path /opt/eve-echoes-tools/neox-tools/script_redirect_plug.py
+cp $crypt_plugin /opt/eve-echoes-tools/neox-tools/script_redirect_plug.py
 fi
 
 subcommand=$1; shift
@@ -48,8 +48,10 @@ case "$subcommand" in
       esac
     done
     patch_path=$patch
-    xapk_path="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
-    out_dir="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ))
+    xapk_path="${!OPTIND}"
+    OPTIND=$(( $OPTIND + 1 ))
+    out_dir="${!OPTIND}"
+    OPTIND=$(( $OPTIND + 1 ))
 
     echo $patch_path
     echo $xapk_path
@@ -66,3 +68,4 @@ case "$subcommand" in
 
     ;;
 esac
+

@@ -19,7 +19,7 @@ shift $((OPTIND -1))
 
 if [ ! -z "$crypt_plugin" ]
 then
-cp $crypt_plugin /opt/eve-echoes-tools/neox-tools/script_redirect_plug.py
+cp $crypt_plugin /opt/eve-echoes-tools/neox-tools/scripts/script_redirect_plug.py
 fi
 
 subcommand=$1; shift

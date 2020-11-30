@@ -20,6 +20,13 @@ from multiprocessing import Pool, Lock
 PYTHON3 = sys.version_info >= (3, 0)
 
 
+class SetEncoder(json.JSONEncoder):
+    def default(self, obj):
+       if isinstance(obj, set):
+          return list(obj)
+       return json.JSONEncoder.default(self, obj)
+
+
 def error(msg):
     prefix = '\033[1m\033[31mERROR\033[0m' if os.isatty(1) else 'ERROR'
     print('%s: %s' % (prefix, msg))
@@ -95,6 +102,50 @@ def execute_stdout(argv, no_output=False, env=os.environ):
             print(e.output)
         raise e
 
+### START of Patch file management
+
+patch_file_list = collections.OrderedDict()
+def process_patch_files(patch_file_dir):
+    with open(os.path.join(patch_file_dir, "0", "1", "2081783950193513057"), "rb") as f:
+        compressed_filelist = f.read()
+    filelist = zlib.decompress(compressed_filelist)
+    if type(filelist) is not str:
+        filelist = filelist.decode('utf-8')
+
+    m = collections.OrderedDict()
+    for line in filelist.splitlines():
+        info = line.split('\t')
+        patch_file = check_patch_file_exists(info[1])
+        filename = str(info[5])
+        
+        if patch_file is not None:
+            m[filename] = patch_file
+
+    global patch_file_list
+    patch_file_list = m
+
+def check_patch_file_exists(patch_file):
+    if patch_file is not None:
+        f0 = os.path.join(args.patch, "0", "0", str(patch_file))
+        f1 = os.path.join(args.patch, "0", "1", str(patch_file))
+        if os.path.exists(f0):
+            return f0
+        elif os.path.exists(f1):
+            return f1
+    return None
+
+def patch_file_for_path(path):
+    print("Looking up patch for file {}".format(path))
+    if path in patch_file_list:
+        patch_file = patch_file_list[path]
+        print("Patch file found for {} at {}".format(path, patch_file))
+        return patch_file
+
+    print("No patch for file {}".format(path))            
+    return None
+
+### END of Patch file management
+
 # TODO(alexander): Move this to neox-tools
 # In some way at least, maybe strip it down a bit idk
 
@@ -104,13 +155,18 @@ def init(l):
     lock = l
 
 
-def dump_script(filename, script_extract_dir):
-    if not filename.endswith(".nxs"):
+def dump_script(filename, script_extract_dir, is_patch=False):
+    if not filename.endswith(".nxs") and is_patch == False:
         return True
 
     try:
-        script_redirect_out = execute_stdout([sys.executable, "neox-tools/scripts/script_redirect.py", os.path.join(script_extract_dir,
-                                                                                                                    filename)], True)
+        file_path = ""
+        if is_patch:
+            file_path = filename
+        else:
+            file_path = os.path.join(script_extract_dir, filename)
+
+        script_redirect_out = execute_stdout([sys.executable, "neox-tools/scripts/script_redirect.py", file_path], True)
     except subprocess.CalledProcessError as e:
         if e.returncode >= 132:
             return False
@@ -177,8 +233,16 @@ def dump_script(filename, script_extract_dir):
             finally:
                 lock.release()
 
-            shutil.copy(py_file.name, os.path.join(
-                args.outdir, "script", filename))
+            nxs_filename = os.path.splitext(filename)[0] + ".nxs"
+            patch_filename = patch_file_for_path(nxs_filename)
+
+            if is_patch == False and patch_filename is not None:
+                print("Ignoring file in favor of patch, processing...")
+                dump_script(patch_filename, script_extract_dir, True)
+            else: 
+                print("Writing final script to {}".format(filename))
+                shutil.copy(py_file.name, os.path.join(
+                    args.outdir, "script", filename))
         else:
             # TODO(alexander): Move to scripts_failed dir?
             pass
@@ -235,28 +299,12 @@ def dump_scripts(apk):
                 files = files[1:]
                 pool.map_async(dump_script_unpack, files).get(9999999)
 
-
 def dump_static_data_fsd(xapk_temp_dir):
     obb_path = os.path.join(xapk_temp_dir, "Android",
                             "obb", "com.netease.eve.en")
     for filename in os.listdir(obb_path):
         with zipfile.ZipFile(os.path.join(obb_path, filename), 'r') as obb_zip:
             obb_zip.extractall(obb_path)
-
-    filelist = None
-    if args.patch is not None:
-        with open(os.path.join(args.patch, "0", "1", "2081783950193513057"), "rb") as f:
-            compressed_filelist = f.read()
-        filelist = zlib.decompress(compressed_filelist)
-        if type(filelist) is not str:
-            filelist = filelist.decode('utf-8')
-        m = collections.OrderedDict()
-        for line in filelist.splitlines():
-            info = line.split('\t')
-            hash = info[0]
-            path = str(info[5])
-            m[hash] = path
-        filelist = m
 
     # Path to staticdata inside xapk
     static_data_dir = os.path.join(
@@ -265,8 +313,6 @@ def dump_static_data_fsd(xapk_temp_dir):
 
     for root, dirnames, filenames in os.walk(static_data_dir):
         for filename in fnmatch.filter(filenames, '*.sd'):
-            # if not filename.endswith("48.sd"):
-            #     continue
             dir = os.path.relpath(root, static_data_dir)
             sd_json_dir = os.path.join(args.outdir, "staticdata", dir)
             if not os.path.exists(sd_json_dir):
@@ -274,16 +320,15 @@ def dump_static_data_fsd(xapk_temp_dir):
 
             sd_file_name = os.path.join(root, filename)
             if args.patch is not None:
-                top = mmh3.hash(os.path.join("staticdata", dir,
-                                             filename).replace("/", "\\"), 0x9747B28C)
-                bottom = mmh3.hash(os.path.join(
-                    "staticdata", dir, filename).replace("/", "\\"), 0xC82B7479)
-                hash = bottom | (top << 0x20)
-                f = os.path.join(args.patch, "0", "1", str(hash))
-                if os.path.exists(f):
-                    print("Copy patched file")
+                print("Looking for patch for file {}".format(filename))
+                hash_source = os.path.join("staticdata", dir, filename)
+
+                patch_file = patch_file_for_path(hash_source)
+
+                if patch_file is not None:
+                    print("Copying patch file {} to {}".format(patch_file, sd_file_name))
                     # Copy the patched file over the original :)
-                    shutil.copy(f, sd_file_name)
+                    shutil.copy(patch_file, sd_file_name)
 
             if which("fsd2json") is not None:
                 execute(["fsd2json", "-o", sd_json_dir, sd_file_name])
@@ -400,7 +445,7 @@ def extract_data_from_python(filename, directory, sub):
                     f.write(unicode(j))
                 else:
                     j = json.dumps(
-                        out_data, ensure_ascii=False, indent=4)
+                        out_data, ensure_ascii=False, indent=4, cls=SetEncoder)
                     f.write(j)
 
         except (NameError, SyntaxError, SystemError, ImportError, RuntimeError):
@@ -427,6 +472,10 @@ def convert_files(root_dir, sub):
 
 
 with tempdir() as xapk_temp_dir:
+
+    if args.patch is not None:
+        process_patch_files(args.patch)
+        
     with zipfile.ZipFile(args.apk, 'r') as zip_ref:
         zip_ref.extractall(xapk_temp_dir)
 

@@ -60,12 +60,16 @@ def which(program):
 
 parser = argparse.ArgumentParser(
     description='Dump all the static data out of the Eve Echoes XAPK')
-parser.add_argument('apk', type=str, action='store',
-                    help="APK File to extract static data from")
+parser.add_argument('xapk', type=str, action='store',
+                    help="XAPK File to extract static data from")
 parser.add_argument('outdir', type=str, action='store',
                     help="Target directory to extract the static data to")
 parser.add_argument('--patch', type=str, action='store',
                     help="Patch directory to use")
+parser.add_argument('--obb', type=str, action='store',
+                    help="Extracted OBB directory to use")
+parser.add_argument('--apk', type=str, action='store',
+                    help="Extracted APK directory to use")
 
 args = parser.parse_args()
 
@@ -272,44 +276,48 @@ def dump_scripts(apk):
         # Script stuff
         with zipfile.ZipFile(apk) as apk_zip:
             apk_zip.extractall(apk_temp_dir)
-            script_npk = os.path.join(apk_temp_dir, "assets", "script.npk")
-        with tempdir() as script_extract_dir:
-            if which("npktool") is not None:
-                execute(["npktool", "x", '-d', script_extract_dir, script_npk])
-            else:
-                execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
-                         "--", "x", '-d', script_extract_dir, script_npk])
+            dump_scripts_from_apk_data(apk_temp_dir)
 
-            # Prepare data for parallel execution
-            files = []
-            for root, dirnames, filenames in os.walk(script_extract_dir):
-                for filename in filenames:
-                    files.append((filename, root))
+def dump_scripts_from_apk_data(apk_data_dir):
+    script_npk = os.path.join(apk_data_dir, "assets", "script.npk")
 
-            # Attempt to distribute larger files over more executors
-            # in testing this does slightly improve things
-            import random
-            random.shuffle(files)
+    with tempdir() as script_extract_dir:
+        if which("npktool") is not None:
+            execute(["npktool", "x", '-d', script_extract_dir, script_npk])
+        else:
+            execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
+                        "--", "x", '-d', script_extract_dir, script_npk])
 
-            # Create pool for parallel execution
-            # The lock here is used to synchronize directory create calls
-            lock = Lock()
-            import multiprocessing
-            pool = Pool(int(multiprocessing.cpu_count()),
-                        initializer=init, initargs=(lock,patch_file_list,))
+        # Prepare data for parallel execution
+        files = []
+        for root, dirnames, filenames in os.walk(script_extract_dir):
+            for filename in filenames:
+                files.append((filename, root))
 
-            if len(files) > 0:
-                # Make sure we even have a compatible decrypt plugin available
-                # If we don't, just abort and tell the user such, nothing else we can do.
-                file = files[0]
-                init(lock,patch_file_list)
-                if not dump_script_unpack(file):
-                    warn(
-                        "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
-                    return
+        # Attempt to distribute larger files over more executors
+        # in testing this does slightly improve things
+        import random
+        random.shuffle(files)
 
-                files = files[1:]
-                pool.map_async(dump_script_unpack, files).get(9999999)
+        # Create pool for parallel execution
+        # The lock here is used to synchronize directory create calls
+        lock = Lock()
+        import multiprocessing
+        pool = Pool(int(multiprocessing.cpu_count()),
+                    initializer=init, initargs=(lock,patch_file_list,))
+
+        if len(files) > 0:
+            # Make sure we even have a compatible decrypt plugin available
+            # If we don't, just abort and tell the user such, nothing else we can do.
+            file = files[0]
+            init(lock,patch_file_list)
+            if not dump_script_unpack(file):
+                warn(
+                    "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
+                return
+
+            files = files[1:]
+            pool.map_async(dump_script_unpack, files).get(9999999)
 
 
 def dump_static_data_fsd(xapk_temp_dir):
@@ -321,8 +329,14 @@ def dump_static_data_fsd(xapk_temp_dir):
 
     # Path to staticdata inside xapk
     static_data_dir = os.path.join(
-        xapk_temp_dir, "Android", "obb", "com.netease.eve.en", "res", "staticdata")
+        xapk_temp_dir, "Android", "obb", "com.netease.eve.en")
+
+    dump_static_data_fsd_from_obb_data(static_data_dir)
+
+def dump_static_data_fsd_from_obb_data(obb_data_dir):
+    static_data_dir = os.path.join(obb_data_dir, "res", "staticdata")
     static_data_dir = os.path.abspath(os.path.realpath(static_data_dir))
+    print('Dumping OBB data from ', static_data_dir)
 
     for root, dirnames, filenames in os.walk(static_data_dir):
         for filename in fnmatch.filter(filenames, '*.sd'):
@@ -493,25 +507,34 @@ def convert_files(root_dir, sub):
     pool.map_async(extract_data_from_python_unpack, files).get(9999999)
 
 
-with tempdir() as xapk_temp_dir:
+if __name__ == '__main__':
 
     if args.patch is not None:
         process_patch_files(args.patch)
 
-    with zipfile.ZipFile(args.apk, 'r') as zip_ref:
-        zip_ref.extractall(xapk_temp_dir)
+    if args.obb is not None and args.apk is not None:
+        print('Reading data files from {} {}', args.obb, args.apk)
+        dump_scripts_from_apk_data(args.apk)
+        dump_static_data_fsd_from_obb_data(args.obb)
 
-        for filename in os.listdir(xapk_temp_dir):
-            if filename.endswith(".apk"):
-                apk = os.path.join(xapk_temp_dir, filename)
-                dump_scripts(apk)
+    else: # Extract from xapk file   
 
-        # Static Data stuff
-        dump_static_data_fsd(xapk_temp_dir)
+        with tempdir() as xapk_temp_dir:
+
+            with zipfile.ZipFile(args.xapk, 'r') as zip_ref:
+                zip_ref.extractall(xapk_temp_dir)
+
+                for filename in os.listdir(xapk_temp_dir):
+                    if filename.endswith(".apk"):
+                        apk = os.path.join(xapk_temp_dir, filename)
+                        dump_scripts(apk)
+
+                # Static Data stuff
+                dump_static_data_fsd(xapk_temp_dir)
 
         # Script data to json
-        convert_files(os.path.join(args.outdir, "script", "data"), "data")
-        convert_files(os.path.join(args.outdir, "script",
-                                   "data_common"), "data_common")
+    convert_files(os.path.join(args.outdir, "script", "data"), "data")
+    convert_files(os.path.join(args.outdir, "script",
+                                "data_common"), "data_common")
 
 # print(script_npk)

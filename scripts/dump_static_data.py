@@ -159,9 +159,11 @@ def patch_file_for_path(path):
 # In some way at least, maybe strip it down a bit idk
 
 
-def init(l):
+def init(l, pfl):
     global lock
+    global patch_file_list
     lock = l
+    patch_file_list = pfl
 
 
 def dump_script(filename, script_extract_dir, is_patch=False):
@@ -294,13 +296,13 @@ def dump_scripts(apk):
             lock = Lock()
             import multiprocessing
             pool = Pool(int(multiprocessing.cpu_count()),
-                        initializer=init, initargs=(lock,))
+                        initializer=init, initargs=(lock,patch_file_list,))
 
             if len(files) > 0:
                 # Make sure we even have a compatible decrypt plugin available
                 # If we don't, just abort and tell the user such, nothing else we can do.
                 file = files[0]
-                init(lock)
+                init(lock,patch_file_list)
                 if not dump_script_unpack(file):
                     warn(
                         "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
@@ -486,8 +488,8 @@ def convert_files(root_dir, sub):
     lock = Lock()
     import multiprocessing
     pool = Pool(int(multiprocessing.cpu_count()),
-                initializer=init, initargs=(lock,))
-    init(lock)
+                initializer=init, initargs=(lock,patch_file_list,))
+    init(lock,patch_file_list,)
     pool.map_async(extract_data_from_python_unpack, files).get(9999999)
 
 

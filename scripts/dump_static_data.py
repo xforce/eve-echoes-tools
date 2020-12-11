@@ -109,12 +109,14 @@ patch_file_list = collections.OrderedDict()
 
 
 def process_patch_files(patch_file_dir):
+    print("Locating patch index file...")
     with open(os.path.join(patch_file_dir, "0", "1", "2081783950193513057"), "rb") as f:
         compressed_filelist = f.read()
     filelist = zlib.decompress(compressed_filelist)
     if type(filelist) is not str:
         filelist = filelist.decode('utf-8')
 
+    print("Parsing patch files for existence...")
     m = collections.OrderedDict()
     for line in filelist.splitlines():
         info = line.split('\t')
@@ -126,6 +128,8 @@ def process_patch_files(patch_file_dir):
 
     global patch_file_list
     patch_file_list = m
+    
+    print("Patch files loaded :)")
 
 
 def check_patch_file_exists(patch_file):
@@ -155,9 +159,11 @@ def patch_file_for_path(path):
 # In some way at least, maybe strip it down a bit idk
 
 
-def init(l):
+def init(l, pfl):
     global lock
+    global patch_file_list
     lock = l
+    patch_file_list = pfl
 
 
 def dump_script(filename, script_extract_dir, is_patch=False):
@@ -290,13 +296,13 @@ def dump_scripts(apk):
             lock = Lock()
             import multiprocessing
             pool = Pool(int(multiprocessing.cpu_count()),
-                        initializer=init, initargs=(lock,))
+                        initializer=init, initargs=(lock,patch_file_list,))
 
             if len(files) > 0:
                 # Make sure we even have a compatible decrypt plugin available
                 # If we don't, just abort and tell the user such, nothing else we can do.
                 file = files[0]
-                init(lock)
+                init(lock,patch_file_list)
                 if not dump_script_unpack(file):
                     warn(
                         "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
@@ -482,8 +488,8 @@ def convert_files(root_dir, sub):
     lock = Lock()
     import multiprocessing
     pool = Pool(int(multiprocessing.cpu_count()),
-                initializer=init, initargs=(lock,))
-    init(lock)
+                initializer=init, initargs=(lock,patch_file_list,))
+    init(lock,patch_file_list,)
     pool.map_async(extract_data_from_python_unpack, files).get(9999999)
 
 

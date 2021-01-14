@@ -120,9 +120,19 @@ def process_patch_files(patch_file_dir):
     if type(filelist) is not str:
         filelist = filelist.decode('utf-8')
 
-    print("Parsing patch files for existence...")
+    f = open(os.path.join(patch_file_dir, "filelist.txt"), "w")
+    f.write(filelist)
+    f.close()
+
     m = collections.OrderedDict()
-    for line in filelist.splitlines():
+    lines = filelist.splitlines()
+    numLines = len(lines)
+    print("Parsing", numLines, "patch files for existence...")
+    i = 0
+    for line in lines:
+        i += 1
+        print(i, "/", numLines, end="", flush=True)
+        print('\r', end='') 
         info = line.split('\t')
         patch_file = check_patch_file_exists(info[1])
         filename = str(info[5])
@@ -513,7 +523,7 @@ if __name__ == '__main__':
         process_patch_files(args.patch)
 
     if args.obb is not None and args.apk is not None:
-        print('Reading data files from {} {}', args.obb, args.apk)
+        print('Reading data files from ', args.obb, args.apk)
         dump_scripts_from_apk_data(args.apk)
         dump_static_data_fsd_from_obb_data(args.obb)
 

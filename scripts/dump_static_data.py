@@ -78,14 +78,13 @@ parser.add_argument('-p', '--patch', type=str, action='store',
 args = parser.parse_args()
 
 def yes_or_no(question):
-    reply = str(raw_input(question+' (y/n): ')).lower().strip()
+    reply = str(input(question+' (y/n): ')).lower().strip()
     if reply[0] == 'y':
         return True
     if reply[0] == 'n':
         return False
     else:
         return yes_or_no("Uhhhh... please enter ")
-
 @contextlib.contextmanager
 def tempdir_if_required(dirpath):
 
@@ -93,11 +92,10 @@ def tempdir_if_required(dirpath):
         cleanup_needed = True
         dirpath = tempfile.mkdtemp() 
     else:
-        if not os.path.exists(dirpath):
-            os.makedirs(dirpath)
-        # else:
-        #     if yes_or_no('Clear folder?: {}'.format(dirpath)):
-        #         shutil.rmtree(dirpath)
+        if os.path.exists(dirpath) and yes_or_no('Clear folder?: {}'.format(dirpath)):
+            shutil.rmtree(dirpath)
+
+        os.makedirs(dirpath, exist_ok=True)
         cleanup_needed = False
 
     def cleanup(cleanup_needed):
@@ -182,43 +180,88 @@ def process_patch_file_listing(patch_file_dir):
 
 
 def apply_patch_files(patch_file_dir, game_data_dir):
-    for root, dirnames, filenames in os.walk(patch_file_dir):
+    for root, _, filenames in os.walk(patch_file_dir):
         for filename in filenames:
             if filename in patch_file_map:
-                patch_dest_file_name = patch_file_map[filename]
                 patch_file_path_src = os.path.join(root, filename)
-                patch_file_path_dest = os.path.join(game_data_dir, patch_dest_file_name)
+                patch_file_path_dest = os.path.join(game_data_dir, patch_file_map[filename])
                 patch_file_path_dest_dir = os.path.dirname(patch_file_path_dest)
 
                 if not os.path.exists(patch_file_path_dest_dir):
                     os.makedirs(patch_file_path_dest_dir)
                 
                 shutil.copyfile(patch_file_path_src, patch_file_path_dest)
-                #os.rename(os.path.join(patch_file_path_dest_dir, filename), patch_file_path_dest)
             else:
                 warn('Patch file not found in index! {}'.format(filename))
-
-# END of Patch file management
 
 # TODO(alexander): Move this to neox-tools
 # In some way at least, maybe strip it down a bit idk
 
-def init(l, pfl):
+def init(l):
     global lock
-    global patch_file_map
     lock = l
-    patch_file_map = pfl
 
 ####
-# Parse scripts
+# Process Game Data
 ####
 
-def dump_script(filename, script_extract_dir):
-    if not filename.endswith(".nxs"):
+def search_for_scripts(game_data_dir):
+    # Prepare data for parallel execution
+    files = []
+    for root, dirnames, filenames in os.walk(game_data_dir):
+        for filename in filenames:            
+            dir = os.path.relpath(root, game_data_dir)
+            files.append((filename, dir, root))
+
+    # Attempt to distribute larger files over more executors
+    # in testing this does slightly improve things
+    import random
+    random.shuffle(files)
+
+    # Create pool for parallel execution
+    # The lock here is used to synchronize directory create calls
+    lock = Lock()
+    import multiprocessing
+    pool = Pool(int(multiprocessing.cpu_count()),
+                initializer=init, initargs=(lock,))
+
+    if len(files) > 0:
+        # Make sure we even have a compatible decrypt plugin available
+        # If we don't, just abort and tell the user such, nothing else we can do.
+        file = files[0]
+        init(lock,)
+        if not parse_file_unpack(file):
+            warn(
+                "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
+            return
+
+        files = files[1:]
+        pool.map_async(parse_file_unpack, files).get(9999999)
+
+def parse_file(filename, relative_dir, root_dir):
+    if filename.endswith(".nxs"):
+        return dump_script(filename, relative_dir, root_dir)
+    elif filename.endswith('.sd'):
+        return dump_sd(filename, relative_dir, root_dir)
+    else:
         return True
 
+def dump_sd(filename, relative_dir, root_dir):
+    file_path = os.path.join(root_dir, filename)
+    sd_json_dir = os.path.join(args.outdir, relative_dir)
+    if not os.path.exists(sd_json_dir):
+        os.makedirs(sd_json_dir)
+    if which("fsd2json") is not None:
+        execute(["fsd2json", "-o", sd_json_dir, file_path])
+    else:
+        execute(["cargo", "run", "--bin",
+                    "fsd2json", "--", "-o", sd_json_dir, file_path])
+
+    return True
+
+def dump_script(filename, relative_dir, root_dir):
     try:
-        file_path = os.path.join(script_extract_dir, filename)
+        file_path = os.path.join(root_dir, filename)
 
         script_redirect_out = execute_stdout(
             [sys.executable, "neox-tools/scripts/script_redirect.py", file_path], True)
@@ -232,6 +275,7 @@ def dump_script(filename, script_extract_dir):
         mode="wb", delete=False)
     c_pyc_file.write(script_redirect_out)
     c_pyc_file.close()
+
     pyc_script_file = tempfile.NamedTemporaryFile(
         mode="wb", delete=False, suffix=".pyc")
     pyc_script_file.close()
@@ -250,6 +294,7 @@ def dump_script(filename, script_extract_dir):
             args.outdir, "failed", filename))
 
     os.remove(c_pyc_file.name)
+
     with tempfile.NamedTemporaryFile(mode="wb", delete=False) as py_file:
         if execute([sys.executable, "neox-tools/scripts/decompile_pyc.py",
                     "-o", py_file.name, pyc_script_file.name]) != 0:
@@ -272,58 +317,24 @@ def dump_script(filename, script_extract_dir):
         lines = py_file.readlines()
         py_file.close()
 
-        # TODO(alexander): Argh
-        if len(lines) > 5 and lines[5].startswith("# Embedded file name:"):
-            print(filename, pyc_script_file.name)
-            filename = lines[5].replace(
-                "# Embedded file name: ", "")
-            filename = filename.replace("\\", "/")
-            filename = filename.replace("\n", "")
-            filedir = os.path.join(
-                args.outdir, "script", os.path.dirname(filename))
-            try:
-                lock.acquire()
-                if not os.path.exists(filedir):
-                    os.makedirs(filedir)
-            finally:
-                lock.release()
+        filename = filename.replace(".nxs", ".py")
+        filedir = os.path.join(
+            args.outdir, "script", relative_dir)
+        try:
+            lock.acquire()
+            if not os.path.exists(filedir):
+                os.makedirs(filedir)
+        finally:
+            lock.release()
 
-            nxs_filename = os.path.splitext(filename)[0] + ".nxs"
-            shutil.copy(py_file.name, os.path.join(args.outdir, "script", filename))
-        else:
-            # TODO(alexander): Move to scripts_failed dir?
-            pass
+        shutil.copy(py_file.name, os.path.join(filedir, filename))
         os.remove(py_file.name)
 
     return True
 
 
-def dump_script_unpack(args):
-    return dump_script(*args)
-
-####
-# Unpack Android files
-####
-
-def dump_scripts(apk):
-    with tempdir() as apk_temp_dir:
-        # Script stuff
-        with zipfile.ZipFile(apk) as apk_zip:
-            apk_zip.extractall(apk_temp_dir)
-            dump_scripts_from_apk_data(apk_temp_dir)
-
-def dump_static_data_fsd(xapk_temp_dir):
-    obb_path = os.path.join(xapk_temp_dir, "Android",
-                            "obb", "com.netease.eve.en")
-    for filename in os.listdir(obb_path):
-        with zipfile.ZipFile(os.path.join(obb_path, filename), 'r') as obb_zip:
-            obb_zip.extractall(obb_path)
-
-    # Path to staticdata inside xapk
-    static_data_dir = os.path.join(
-        xapk_temp_dir, "Android", "obb", "com.netease.eve.en")
-
-    dump_static_data_fsd_from_obb_data(static_data_dir)
+def parse_file_unpack(args):
+    return parse_file(*args)
 
 ####
 # Unpack Game Data
@@ -351,54 +362,6 @@ def dump_from_unpacked_data(unpacked_dir, output_dir):
 
     execute_cmds.extend(npk_files)
     execute(execute_cmds)
-
-def search_for_scripts(game_data_dir):
-    # Prepare data for parallel execution
-    files = []
-    for root, dirnames, filenames in os.walk(game_data_dir):
-        for filename in filenames:
-            files.append((filename, root))
-
-    # Attempt to distribute larger files over more executors
-    # in testing this does slightly improve things
-    import random
-    random.shuffle(files)
-
-    # Create pool for parallel execution
-    # The lock here is used to synchronize directory create calls
-    lock = Lock()
-    import multiprocessing
-    pool = Pool(int(multiprocessing.cpu_count()),
-                initializer=init, initargs=(lock,patch_file_map,))
-
-    if len(files) > 0:
-        # Make sure we even have a compatible decrypt plugin available
-        # If we don't, just abort and tell the user such, nothing else we can do.
-        file = files[0]
-        init(lock,patch_file_map)
-        if not dump_script_unpack(file):
-            warn(
-                "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
-            return
-
-        files = files[1:]
-        pool.map_async(dump_script_unpack, files).get(9999999)
-
-def process_static_data(game_data_dir):
-    for root, dirnames, filenames in os.walk(game_data_dir):
-        for filename in fnmatch.filter(filenames, '*.sd'):
-            dir = os.path.relpath(root, game_data_dir)
-            sd_json_dir = os.path.join(args.outdir, dir)
-            if not os.path.exists(sd_json_dir):
-                os.makedirs(sd_json_dir)
-
-            sd_file_name = os.path.join(root, filename)
-
-            if which("fsd2json") is not None:
-                execute(["fsd2json", "-o", sd_json_dir, sd_file_name])
-            else:
-                execute(["cargo", "run", "--bin",
-                         "fsd2json", "--", "-o", sd_json_dir, sd_file_name])
 
 ####
 # Transform Python Data
@@ -451,7 +414,7 @@ def extract_data_from_python(filename, directory, sub):
                 # Look for exprstmt with a name inside
                 # And use that if we find id
                 if expr.type == 'simple_stmt':
-                    # This 'ususally' works for extracting the contained ExprStmt
+                    # This 'usually' works for extracting the contained ExprStmt
                     # HACK HACK HACK
                     expr = expr.children[0]
 
@@ -541,8 +504,8 @@ def convert_files(root_dir, sub):
     lock = Lock()
     import multiprocessing
     pool = Pool(int(multiprocessing.cpu_count()),
-                initializer=init, initargs=(lock,patch_file_map,))
-    init(lock,patch_file_map,)
+                initializer=init, initargs=(lock,))
+    init(lock,)
     pool.map_async(extract_data_from_python_unpack, files).get(9999999)
 
 ####
@@ -590,7 +553,8 @@ if __name__ == '__main__':
                     process_patch_file_listing(args.patch)
 
                 ## Extract all NPK files to game_data folder
-                #dump_from_unpacked_data(unpack_dir, game_data_dir)
+                print('Extracting game assets')
+                dump_from_unpacked_data(unpack_dir, game_data_dir)
 
                 ## Copy OBB res/* to game_data folder
                 print('Moving static data into game data...')
@@ -605,10 +569,9 @@ if __name__ == '__main__':
                 ## Process all files in output 
                 print('Searching scripts...')
                 search_for_scripts(game_data_dir)
-                print('Processing static data...')
-                process_static_data(game_data_dir)
 
                 ## Convert Python data files
+                print('Converting Python data files...')
                 convert_files(os.path.join(args.outdir, "script", "data"), "data")
                 convert_files(os.path.join(args.outdir, "script",
                                             "data_common"), "data_common")

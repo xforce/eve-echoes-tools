@@ -288,7 +288,7 @@ def dump_script(filename, relative_dir, root_dir):
                 c_pyc_file.name, pyc_script_file.name]) != 0:
         from shutil import copyfile
         filedir = os.path.join(
-            args.outdir, "failed", os.path.dirname(filename))
+            args.outdir, "failed", relative_dir, os.path.dirname(filename))
         try:
             lock.acquire()
             if not os.path.exists(filedir):
@@ -296,7 +296,7 @@ def dump_script(filename, relative_dir, root_dir):
         finally:
             lock.release()
         copyfile(c_pyc_file.name, os.path.join(
-            args.outdir, "failed", filename))
+            args.outdir, "failed", relative_dir, filename))
 
     os.remove(c_pyc_file.name)
 
@@ -305,7 +305,7 @@ def dump_script(filename, relative_dir, root_dir):
                     "-o", py_file.name, pyc_script_file.name]) != 0:
             from shutil import copyfile
             filedir = os.path.join(
-                args.outdir, "failed", os.path.dirname(filename))
+                args.outdir, "failed", relative_dir, os.path.dirname(filename))
             try:
                 lock.acquire()
                 if not os.path.exists(filedir):
@@ -313,7 +313,7 @@ def dump_script(filename, relative_dir, root_dir):
             finally:
                 lock.release()
             copyfile(pyc_script_file.name, os.path.join(
-                args.outdir, "failed", filename + ".pyc"))
+                args.outdir, "failed", relative_dir, filename + ".pyc"))
         os.remove(pyc_script_file.name)
 
         py_file.close()
@@ -557,11 +557,11 @@ if __name__ == '__main__':
                 if args.patch is not None:
                     process_patch_file_listing(args.patch)
 
-                # Extract all NPK files to game_data folder
+                ## Extract all NPK files to game_data folder
                 print('Extracting game assets')
                 dump_from_unpacked_data(unpack_dir, game_data_dir)
 # 
-                # Copy OBB res/* to game_data folder
+                ## Copy OBB res/* to game_data folder
                 print('Moving static data into game data...')
                 static_data_src = os.path.join(unpack_dir, 'assets', 'res', 'staticdata')
                 static_data_dest = os.path.join(game_data_dir, 'staticdata')

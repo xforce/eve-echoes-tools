@@ -163,12 +163,11 @@ def process_patch_file_listing(patch_file_dir):
     m = collections.OrderedDict()
     lines = filelist.splitlines()
     numLines = len(lines)
-    print("Parsing", numLines, "patch files...", end='')
+    print("Parsing", numLines, "patch files...", end='\r')
     i = 0
     for line in lines:
         i += 1
-        print('\r', end='') 
-        print('Parsing patch entry:', i, "/", numLines, end='')
+        print('Parsing patch entry:', i, "/", numLines, end='\r')
         info = line.split('\t')
         patch_file = str(info[1])
         filename = str(info[5])
@@ -176,13 +175,18 @@ def process_patch_file_listing(patch_file_dir):
 
     global patch_file_map
     patch_file_map = m
-    print() # To run next print on a new line
 
 
 def apply_patch_files(patch_file_dir, game_data_dir):
     for root, _, filenames in os.walk(patch_file_dir):
+        i = 0
+        numFiles = len(filenames)
         for filename in filenames:
-            if filename in patch_file_map:
+            i += 1
+            if filename.startswith('.') or filename in ['filelist.txt', PATCH_FILE_INDEX]:
+                pass
+            elif filename in patch_file_map:
+                print('Applying patch file', i, "/", numFiles, filename, end='\r')
                 patch_file_path_src = os.path.join(root, filename)
                 patch_file_path_dest = os.path.join(game_data_dir, patch_file_map[filename])
                 patch_file_path_dest_dir = os.path.dirname(patch_file_path_dest)
@@ -193,6 +197,7 @@ def apply_patch_files(patch_file_dir, game_data_dir):
                 shutil.copyfile(patch_file_path_src, patch_file_path_dest)
             else:
                 warn('Patch file not found in index! {}'.format(filename))
+    print('\033[KPatch files applied.')
 
 # TODO(alexander): Move this to neox-tools
 # In some way at least, maybe strip it down a bit idk
@@ -552,11 +557,11 @@ if __name__ == '__main__':
                 if args.patch is not None:
                     process_patch_file_listing(args.patch)
 
-                ## Extract all NPK files to game_data folder
+                # Extract all NPK files to game_data folder
                 print('Extracting game assets')
                 dump_from_unpacked_data(unpack_dir, game_data_dir)
-
-                ## Copy OBB res/* to game_data folder
+# 
+                # Copy OBB res/* to game_data folder
                 print('Moving static data into game data...')
                 static_data_src = os.path.join(unpack_dir, 'assets', 'res', 'staticdata')
                 static_data_dest = os.path.join(game_data_dir, 'staticdata')

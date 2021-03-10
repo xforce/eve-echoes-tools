@@ -192,7 +192,7 @@ def apply_patch_files(patch_file_dir, game_data_dir):
                 patch_file_path_dest_dir = os.path.dirname(patch_file_path_dest)
 
                 if not os.path.exists(patch_file_path_dest_dir):
-                    os.makedirs(patch_file_path_dest_dir)
+                    os.makedirs(patch_file_path_dest_dir, exist_ok=True)
                 
                 shutil.copyfile(patch_file_path_src, patch_file_path_dest)
             else:
@@ -255,7 +255,7 @@ def dump_sd(filename, relative_dir, root_dir):
     file_path = os.path.join(root_dir, filename)
     sd_json_dir = os.path.join(args.outdir, relative_dir)
     if not os.path.exists(sd_json_dir):
-        os.makedirs(sd_json_dir)
+        os.makedirs(sd_json_dir, exist_ok=True)
     if which("fsd2json") is not None:
         execute(["fsd2json", "-o", sd_json_dir, file_path])
     else:
@@ -292,7 +292,7 @@ def dump_script(filename, relative_dir, root_dir):
         try:
             lock.acquire()
             if not os.path.exists(filedir):
-                os.makedirs(filedir)
+                os.makedirs(filedir, exist_ok=True)
         finally:
             lock.release()
         copyfile(c_pyc_file.name, os.path.join(
@@ -309,7 +309,7 @@ def dump_script(filename, relative_dir, root_dir):
             try:
                 lock.acquire()
                 if not os.path.exists(filedir):
-                    os.makedirs(filedir)
+                    os.makedirs(filedir, exist_ok=True)
             finally:
                 lock.release()
             copyfile(pyc_script_file.name, os.path.join(
@@ -328,7 +328,7 @@ def dump_script(filename, relative_dir, root_dir):
         try:
             lock.acquire()
             if not os.path.exists(filedir):
-                os.makedirs(filedir)
+                os.makedirs(filedir, exist_ok=True)
         finally:
             lock.release()
 
@@ -472,7 +472,7 @@ def extract_data_from_python(filename, directory, sub):
             try:
                 lock.acquire()
                 if not os.path.exists(out_dir):
-                    os.makedirs(out_dir)
+                    os.makedirs(out_dir, exist_ok=True)
             finally:
                 lock.release()
 

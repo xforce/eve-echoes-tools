@@ -75,6 +75,10 @@ parser.add_argument('-g', '--gamedatadir', type=str, action='store',
 parser.add_argument('-p', '--patch', type=str, action='store',
                     help="Patch directory to use")
 
+parser.add_argument('--patch_game_files', action='store_true',
+                    help="Only patch saved game files, skip unpacking")
+                    
+
 args = parser.parse_args()
 
 def yes_or_no(question):
@@ -519,16 +523,20 @@ def convert_files(root_dir, sub):
 
 if __name__ == '__main__':
 
-    if args.unpackdir is None and args.xapk is None:
+    if args.unpackdir is None and args.xapk is None and args.patch_game_files is not True:
         print('You must give either an unpacked data directory, or an (X)APK containing all the assets.')
     else:
-        with tempdir_if_required(args.unpackdir) as unpack_dir:
-            with tempdir_if_required(args.gamedatadir) as game_data_dir:
+        with tempdir_if_required(args.gamedatadir) as game_data_dir:
+            with tempdir_if_required(args.unpackdir) as unpack_dir:
                 print('----------------------------')
                 print('Unpack Data:', unpack_dir)
                 print('Game Data:', game_data_dir)
                 print('Output Folder:', args.outdir)
                 print('----------------------------')
+
+                ## Parse Patch file listing (if it exists)
+                if args.patch is not None:
+                    process_patch_file_listing(args.patch)
 
                 ## Unpack XAPK if required
                 if args.xapk is not None:
@@ -536,36 +544,32 @@ if __name__ == '__main__':
                         print('Unpacking XAPK:', xapk_temp_dir)
                         with zipfile.ZipFile(args.xapk, 'r') as zip_ref:
                             zip_ref.extractall(xapk_temp_dir)
-
+                            # Walk the files
                             for root, dirnames, filenames in os.walk(xapk_temp_dir):
                                 for filename in filenames:
                                     file_path = os.path.join(root, filename)
-                ## Unpack APK to (temp directory)
+                                    ## Unpack APK to (temp directory)
                                     if filename.endswith(".apk"):
                                         print('Unpacking APK files')
                                         with zipfile.ZipFile(file_path) as apk_zip:
                                             apk_zip.extractall(unpack_dir)
-                ## Unpack OBB to (temp directory)\assets
-                ## Depending on APK - this might already be in place
+                                    ## Unpack OBB to (temp directory)\assets
+                                    ## Depending on APK - this might already be in place
                                     elif filename.endswith(".obb"):
                                         print('Unpacking OBB files')
                                         obb_unpack = os.path.join(unpack_dir, 'assets')
                                         with zipfile.ZipFile(file_path) as obb_zip:
                                             obb_zip.extractall(obb_unpack)
-                
-                ## Parse Patch file listing (if it exists)
-                if args.patch is not None:
-                    process_patch_file_listing(args.patch)
 
                 ## Extract all NPK files to game_data folder
-                print('Extracting game assets')
-                dump_from_unpacked_data(unpack_dir, game_data_dir)
-# 
-                ## Copy OBB res/* to game_data folder
-                print('Moving static data into game data...')
-                static_data_src = os.path.join(unpack_dir, 'assets', 'res', 'staticdata')
-                static_data_dest = os.path.join(game_data_dir, 'staticdata')
-                shutil.copytree(static_data_src, static_data_dest, dirs_exist_ok=True)
+                if args.patch_game_files is not True:
+                    print('Extracting game assets')
+                    dump_from_unpacked_data(unpack_dir, game_data_dir) 
+                    ## Copy OBB res/* to game_data folder
+                    print('Moving static data into game data...')
+                    static_data_src = os.path.join(unpack_dir, 'assets', 'res', 'staticdata')
+                    static_data_dest = os.path.join(game_data_dir, 'staticdata')
+                    shutil.copytree(static_data_src, static_data_dest, dirs_exist_ok=True)
             
                 ## Copy patchfiles into game_data and rename            
                 if args.patch is not None:

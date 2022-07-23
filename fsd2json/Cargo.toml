@@ -7,13 +7,13 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = "3.0.0-beta.2"
-serde = "1.0"
-serde-pickle = {git = "https://github.com/xforce/serde-pickle.git"}
-bytesize = "1.0"
-byteorder = "1"
-log = "0.4"
-simple_logger = "1"
-serde_json = {version = "1", features = ["arbitrary_precision"]}
-num-bigint = "0.2.4"
-num-traits = "0.2.10"
+clap = "3.2.14"
+serde = "1.0.140"
+serde-pickle = { git = "https://github.com/xforce/serde-pickle.git", rev = "76c75fe0061e8f91b4a15914bb901e59d539fe3f" }
+bytesize = "1.1.0"
+byteorder = "1.4.3"
+log = "0.4.17"
+simple_logger = "2.2.0"
+serde_json = { version = "1.0.82", features = ["arbitrary_precision"] }
+num-bigint = "0.4.3"
+num-traits = "0.2.15"

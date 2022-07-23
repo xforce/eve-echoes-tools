@@ -567,12 +567,8 @@ impl FsdValue {
                         let optional_attributes_field = buffer.read_u64::<LittleEndian>().unwrap();
                         for (_, (k, v)) in optional_value_lookups.iter().enumerate() {
                             let i = match Some(v.to_string()) {
-                                Some(v) => {
-                                    v.parse::<u128>().unwrap()
-                                }
-                                None => {
-                                    v.as_u64().unwrap() as u128
-                                }
+                                Some(v) => v.parse::<u128>().unwrap(),
+                                None => v.as_u64().unwrap() as u128,
                             };
                             if (optional_attributes_field as u128) & i == 0 {
                                 offset_attributes.retain(|x| x != k);
@@ -875,12 +871,12 @@ fn main() -> Result<(), FsdDecodeError> {
         .arg(
             Arg::new("OUT")
                 .short('o')
-                .about("Output directory for the resulting .json file")
+                .help("Output directory for the resulting .json file")
                 .takes_value(true),
         )
         .arg(
             Arg::new("INPUT")
-                .about("The FSD file to be converted to json")
+                .help("The FSD file to be converted to json")
                 .required(true)
                 .takes_value(true)
                 .index(1),
@@ -900,7 +896,8 @@ fn main() -> Result<(), FsdDecodeError> {
         let schema_size = reader.read_u32::<LittleEndian>()?;
         let mut buffer = vec![0; schema_size as usize];
         reader.read_exact(&mut buffer)?;
-        let pickle = serde_pickle::from_slice(&buffer);
+        std::fs::write("test.bin", &buffer).unwrap();
+        let pickle = serde_pickle::from_slice(&buffer, serde_pickle::DeOptions::new());
         // NOTE(alexander): This only exists because of byte to string key things, which kind of sucks tbh
         let pickle = &pickle.unwrap();
         let schema = pickle_to_json(pickle);

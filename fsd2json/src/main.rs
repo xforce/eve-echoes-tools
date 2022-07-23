@@ -896,7 +896,6 @@ fn main() -> Result<(), FsdDecodeError> {
         let schema_size = reader.read_u32::<LittleEndian>()?;
         let mut buffer = vec![0; schema_size as usize];
         reader.read_exact(&mut buffer)?;
-        std::fs::write("test.bin", &buffer).unwrap();
         let pickle = serde_pickle::from_slice(&buffer, serde_pickle::DeOptions::new());
         // NOTE(alexander): This only exists because of byte to string key things, which kind of sucks tbh
         let pickle = &pickle.unwrap();

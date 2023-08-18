@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import logging
+from typing import Dict
+
 import mmh3
 import argparse
 import json
@@ -370,6 +373,33 @@ def transform_node(d):
     return d
 
 
+def cleanup_dict(data: Dict):
+    """
+    Cleanups up a data dictionary.
+
+    Decodes (recursively) all bytes (both keys and values) to UTF-8 strings to ensure a
+    JSON compatible representation (json.dumps raises an error if supplied with bytes).
+
+    :param data: The dict to clean up
+    """
+    to_delete = []
+    to_add = {}
+    for k, v in data.items():
+        if type(v) is bytes:
+            data[k] = v.decode("utf-8")
+            logging.warning("Decoded value bytes %s to utf-8", v)
+        if type(k) is bytes:
+            logging.warning("Decoded key bytes %s to utf-8", k)
+            to_add[k.decode("utf-8")] = data[k]
+            to_delete.append(k)
+        if type(v) is dict:
+            cleanup_dict(v)
+    for k in to_delete:
+        data.pop(k)
+    for k, v in to_add.items():
+        data[k] = v
+
+
 def extract_data_from_python(filename, directory, sub):
     if os.path.isfile(filename):
         import ast
@@ -441,6 +471,7 @@ def extract_data_from_python(filename, directory, sub):
 
             if len(out_data.keys()) == 0:
                 return
+            cleanup_dict(out_data)
 
             # Generate output path for extracted python data
             import io
@@ -466,7 +497,7 @@ def extract_data_from_python(filename, directory, sub):
                         out_data, ensure_ascii=False, indent=4, cls=SetEncoder)
                     f.write(j)
 
-        except (NameError, SyntaxError, SystemError, ImportError, RuntimeError):
+        except (NameError, SyntaxError, SystemError, ImportError, RuntimeError, TypeError):
             print("Failed to convert %s" % filename)
             raise
 

@@ -21,6 +21,7 @@ import collections
 from multiprocessing import Pool, Lock
 
 PYTHON3 = sys.version_info >= (3, 0)
+PATCH_FILE_INDEX="2081783950193513057"
 
 
 class SetEncoder(json.JSONEncoder):
@@ -63,14 +64,56 @@ def which(program):
 
 parser = argparse.ArgumentParser(
     description='Dump all the static data out of the Eve Echoes XAPK')
-parser.add_argument('apk', type=str, action='store',
-                    help="APK File to extract static data from")
+parser.add_argument('--xapk', type=str, action='store',
+                    help="XAPK File to extract static data from")
 parser.add_argument('outdir', type=str, action='store',
                     help="Target directory to extract the static data to")
-parser.add_argument('--patch', type=str, action='store',
+
+parser.add_argument('-u', '--unpackdir', type=str, action='store',
+                    help="Target directory to unpack files into")
+
+parser.add_argument('-g', '--gamedatadir', type=str, action='store',
+                    help="Target directory to reconstruct the game data structure")
+
+parser.add_argument('-p', '--patch', type=str, action='store',
                     help="Patch directory to use")
 
+parser.add_argument('--patch_game_files', action='store_true',
+                    help="Only patch saved game files, skip unpacking")
+                    
+
 args = parser.parse_args()
+
+def yes_or_no(question):
+    reply = str(input(question+' (y/n): ')).lower().strip()
+    if reply[0] == 'y':
+        return True
+    if reply[0] == 'n':
+        return False
+    else:
+        return yes_or_no("Uhhhh... please enter ")
+@contextlib.contextmanager
+def tempdir_if_required(dirpath):
+
+    if dirpath is None:
+        cleanup_needed = True
+        dirpath = tempfile.mkdtemp() 
+    else:
+        if os.path.exists(dirpath) and yes_or_no('Clear folder?: {}'.format(dirpath)):
+            shutil.rmtree(dirpath)
+
+        os.makedirs(dirpath, exist_ok=True)
+        cleanup_needed = False
+
+    def cleanup(cleanup_needed):
+        if cleanup_needed:
+            shutil.rmtree(dirpath)
+    try:
+        yield dirpath
+    except Exception as e:
+        raise e
+    finally:
+        cleanup(cleanup_needed)
 
 
 @contextlib.contextmanager
@@ -105,80 +148,132 @@ def execute_stdout(argv, no_output=False, env=os.environ):
             print(e.output)
         raise e
 
-# START of Patch file management
+####
+# Patch file management
+####
 
+patch_file_map = collections.OrderedDict()
+patch_file_list = None
 
-patch_file_list = collections.OrderedDict()
-
-
-def process_patch_files(patch_file_dir):
-    print("Locating patch index file...")
-    with open(os.path.join(patch_file_dir, "0", "1", "2081783950193513057"), "rb") as f:
+def process_patch_file_listing(patch_file_dir):
+    with open(os.path.join(patch_file_dir, "0", "1", PATCH_FILE_INDEX), "rb") as f:
         compressed_filelist = f.read()
     filelist = zlib.decompress(compressed_filelist)
     if type(filelist) is not str:
         filelist = filelist.decode('utf-8')
 
-    print("Parsing patch files for existence...")
+    global patch_file_list 
+    patch_file_list = os.path.join(patch_file_dir, "filelist.txt")
+    with open(patch_file_list, "w") as f:
+        f.write(filelist)
+
     m = collections.OrderedDict()
-    for line in filelist.splitlines():
+    lines = filelist.splitlines()
+    numLines = len(lines)
+    print("Parsing", numLines, "patch files...", end='\r')
+    i = 0
+    for line in lines:
+        i += 1
+        print('Parsing patch entry:', i, "/", numLines, end='\r')
         info = line.split('\t')
-        patch_file = check_patch_file_exists(info[1])
+        patch_file = str(info[1])
         filename = str(info[5])
+        m[patch_file] = filename
 
-        if patch_file is not None:
-            m[filename] = patch_file
-
-    global patch_file_list
-    patch_file_list = m
-    
-    print("Patch files loaded :)")
+    global patch_file_map
+    patch_file_map = m
 
 
-def check_patch_file_exists(patch_file):
-    if patch_file is not None:
-        f0 = os.path.join(args.patch, "0", "0", str(patch_file))
-        f1 = os.path.join(args.patch, "0", "1", str(patch_file))
-        if os.path.exists(f0):
-            return f0
-        elif os.path.exists(f1):
-            return f1
-    return None
+def apply_patch_files(patch_file_dir, game_data_dir):
+    for root, _, filenames in os.walk(patch_file_dir):
+        i = 0
+        numFiles = len(filenames)
+        for filename in filenames:
+            i += 1
+            if filename.startswith('.') or filename in ['filelist.txt', PATCH_FILE_INDEX]:
+                pass
+            elif filename in patch_file_map:
+                print('Applying patch file', i, "/", numFiles, filename, end='\r')
+                patch_file_path_src = os.path.join(root, filename)
+                patch_file_path_dest = os.path.join(game_data_dir, patch_file_map[filename])
+                patch_file_path_dest_dir = os.path.dirname(patch_file_path_dest)
 
-
-def patch_file_for_path(path):
-    print("Looking up patch for file {}".format(path))
-    if path in patch_file_list:
-        patch_file = patch_file_list[path]
-        print("Patch file found for {} at {}".format(path, patch_file))
-        return patch_file
-
-    print("No patch for file {}".format(path))
-    return None
-
-# END of Patch file management
+                if not os.path.exists(patch_file_path_dest_dir):
+                    os.makedirs(patch_file_path_dest_dir, exist_ok=True)
+                
+                shutil.copyfile(patch_file_path_src, patch_file_path_dest)
+            else:
+                warn('Patch file not found in index! {}'.format(filename))
+    print('\033[KPatch files applied.')
 
 # TODO(alexander): Move this to neox-tools
 # In some way at least, maybe strip it down a bit idk
 
-
-def init(l, pfl):
+def init(l):
     global lock
-    global patch_file_list
     lock = l
-    patch_file_list = pfl
 
+####
+# Process Game Data
+####
 
-def dump_script(filename, script_extract_dir, is_patch=False):
-    if not filename.endswith(".nxs") and is_patch == False:
+def search_for_scripts(game_data_dir):
+    # Prepare data for parallel execution
+    files = []
+    for root, dirnames, filenames in os.walk(game_data_dir):
+        for filename in filenames:            
+            dir = os.path.relpath(root, game_data_dir)
+            files.append((filename, dir, root))
+
+    # Attempt to distribute larger files over more executors
+    # in testing this does slightly improve things
+    import random
+    random.shuffle(files)
+
+    # Create pool for parallel execution
+    # The lock here is used to synchronize directory create calls
+    lock = Lock()
+    import multiprocessing
+    pool = Pool(int(multiprocessing.cpu_count()),
+                initializer=init, initargs=(lock,))
+
+    if len(files) > 0:
+        # Make sure we even have a compatible decrypt plugin available
+        # If we don't, just abort and tell the user such, nothing else we can do.
+        file = files[0]
+        init(lock,)
+        if not parse_file_unpack(file):
+            warn(
+                "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
+            return
+
+        files = files[1:]
+        pool.map_async(parse_file_unpack, files).get(9999999)
+
+def parse_file(filename, relative_dir, root_dir):
+    if filename.endswith(".nxs"):
+        return dump_script(filename, relative_dir, root_dir)
+    elif filename.endswith('.sd'):
+        return dump_sd(filename, relative_dir, root_dir)
+    else:
         return True
 
+def dump_sd(filename, relative_dir, root_dir):
+    file_path = os.path.join(root_dir, filename)
+    sd_json_dir = os.path.join(args.outdir, relative_dir)
+    if not os.path.exists(sd_json_dir):
+        os.makedirs(sd_json_dir, exist_ok=True)
+    if which("fsd2json") is not None:
+        execute(["fsd2json", "-o", sd_json_dir, file_path])
+    else:
+        execute(["cargo", "run", "--bin",
+                    "fsd2json", "--", "-o", sd_json_dir, file_path])
+
+    return True
+
+def dump_script(filename, relative_dir, root_dir):
     try:
-        file_path = ""
-        if is_patch:
-            file_path = filename
-        else:
-            file_path = os.path.join(script_extract_dir, filename)
+        file_path = os.path.join(root_dir, filename)
 
         script_redirect_out = execute_stdout(
             [sys.executable, "neox-tools/scripts/script_redirect.py", file_path], True)
@@ -192,6 +287,7 @@ def dump_script(filename, script_extract_dir, is_patch=False):
         mode="wb", delete=False)
     c_pyc_file.write(script_redirect_out)
     c_pyc_file.close()
+
     pyc_script_file = tempfile.NamedTemporaryFile(
         mode="wb", delete=False, suffix=".pyc")
     pyc_script_file.close()
@@ -199,31 +295,32 @@ def dump_script(filename, script_extract_dir, is_patch=False):
                 c_pyc_file.name, pyc_script_file.name]) != 0:
         from shutil import copyfile
         filedir = os.path.join(
-            args.outdir, "failed", os.path.dirname(filename))
+            args.outdir, "failed", relative_dir, os.path.dirname(filename))
         try:
             lock.acquire()
             if not os.path.exists(filedir):
-                os.makedirs(filedir)
+                os.makedirs(filedir, exist_ok=True)
         finally:
             lock.release()
         copyfile(c_pyc_file.name, os.path.join(
-            args.outdir, "failed", filename))
+            args.outdir, "failed", relative_dir, filename))
 
     os.remove(c_pyc_file.name)
+
     with tempfile.NamedTemporaryFile(mode="wb", delete=False) as py_file:
         if execute([sys.executable, "neox-tools/scripts/decompile_pyc.py",
                     "-o", py_file.name, pyc_script_file.name]) != 0:
             from shutil import copyfile
             filedir = os.path.join(
-                args.outdir, "failed", os.path.dirname(filename))
+                args.outdir, "failed", relative_dir, os.path.dirname(filename))
             try:
                 lock.acquire()
                 if not os.path.exists(filedir):
-                    os.makedirs(filedir)
+                    os.makedirs(filedir, exist_ok=True)
             finally:
                 lock.release()
             copyfile(pyc_script_file.name, os.path.join(
-                args.outdir, "failed", filename + ".pyc"))
+                args.outdir, "failed", relative_dir, filename + ".pyc"))
         os.remove(pyc_script_file.name)
 
         py_file.close()
@@ -232,127 +329,55 @@ def dump_script(filename, script_extract_dir, is_patch=False):
         lines = py_file.readlines()
         py_file.close()
 
-        # TODO(alexander): Argh
-        if len(lines) > 5 and lines[5].startswith("# Embedded file name:"):
-            print(filename, pyc_script_file.name)
-            filename = lines[5].replace(
-                "# Embedded file name: ", "")
-            filename = filename.replace("\\", "/")
-            filename = filename.replace("\n", "")
-            filedir = os.path.join(
-                args.outdir, "script", os.path.dirname(filename))
-            try:
-                lock.acquire()
-                if not os.path.exists(filedir):
-                    os.makedirs(filedir)
-            finally:
-                lock.release()
+        filename = filename.replace(".nxs", ".py")
+        filedir = os.path.join(
+            args.outdir, "script", relative_dir)
+        try:
+            lock.acquire()
+            if not os.path.exists(filedir):
+                os.makedirs(filedir, exist_ok=True)
+        finally:
+            lock.release()
 
-            nxs_filename = os.path.splitext(filename)[0] + ".nxs"
-            patch_filename = patch_file_for_path(nxs_filename)
-
-            if is_patch == False and patch_filename is not None:
-                print("Ignoring file in favor of patch, processing...")
-                dump_script(patch_filename, script_extract_dir, True)
-            else:
-                print("Writing final script to {}".format(filename))
-                shutil.copy(py_file.name, os.path.join(
-                    args.outdir, "script", filename))
-        else:
-            # TODO(alexander): Move to scripts_failed dir?
-            pass
+        shutil.copy(py_file.name, os.path.join(filedir, filename))
         os.remove(py_file.name)
 
     return True
 
 
-def dump_script_unpack(args):
-    return dump_script(*args)
+def parse_file_unpack(args):
+    return parse_file(*args)
 
+####
+# Unpack Game Data
+####
 
-def dump_scripts(apk):
-    with tempdir() as apk_temp_dir:
-        # Script stuff
-        with zipfile.ZipFile(apk) as apk_zip:
-            apk_zip.extractall(apk_temp_dir)
-            script_npk = os.path.join(apk_temp_dir, "assets", "script.npk")
-        with tempdir() as script_extract_dir:
-            if which("npktool") is not None:
-                execute(["npktool", "x", '-d', script_extract_dir, script_npk])
-            else:
-                execute(["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml",
-                         "--", "x", '-d', script_extract_dir, script_npk])
+def dump_from_unpacked_data(unpacked_dir, output_dir):
+    assets_dir = os.path.join(unpacked_dir, "assets")
 
-            # Prepare data for parallel execution
-            files = []
-            for root, dirnames, filenames in os.walk(script_extract_dir):
-                for filename in filenames:
-                    files.append((filename, root))
+    npk_files = []
+    for root, dirnames, filenames in os.walk(assets_dir):
+        for filename in fnmatch.filter(filenames, '*.npk'):
+            npk_file_name = os.path.join(root, filename)
+            npk_files.append(npk_file_name)
 
-            # Attempt to distribute larger files over more executors
-            # in testing this does slightly improve things
-            import random
-            random.shuffle(files)
+    if which("npktool") is not None:
+        execute_cmds = ["npktool"]
+    else:
+        execute_cmds = ["cargo", "run", "--release", "--manifest-path=neox-tools/Cargo.toml", "--"]
 
-            # Create pool for parallel execution
-            # The lock here is used to synchronize directory create calls
-            lock = Lock()
-            import multiprocessing
-            pool = Pool(int(multiprocessing.cpu_count()),
-                        initializer=init, initargs=(lock,patch_file_list,))
+    execute_cmds.extend(['x', '-d', output_dir])
 
-            if len(files) > 0:
-                # Make sure we even have a compatible decrypt plugin available
-                # If we don't, just abort and tell the user such, nothing else we can do.
-                file = files[0]
-                init(lock,patch_file_list)
-                if not dump_script_unpack(file):
-                    warn(
-                        "Script redirect decrypt plugin not found, disable script decompilation and script data extraction")
-                    return
+    global patch_file_list
+    if patch_file_list is not None:
+        execute_cmds.extend(['-f', patch_file_list])
 
-                files = files[1:]
-                pool.map_async(dump_script_unpack, files).get(9999999)
+    execute_cmds.extend(npk_files)
+    execute(execute_cmds)
 
-
-def dump_static_data_fsd(xapk_temp_dir):
-    obb_path = os.path.join(xapk_temp_dir, "Android",
-                            "obb", "com.netease.eve.en")
-    for filename in os.listdir(obb_path):
-        with zipfile.ZipFile(os.path.join(obb_path, filename), 'r') as obb_zip:
-            obb_zip.extractall(obb_path)
-
-    # Path to staticdata inside xapk
-    static_data_dir = os.path.join(
-        xapk_temp_dir, "Android", "obb", "com.netease.eve.en", "res", "staticdata")
-    static_data_dir = os.path.abspath(os.path.realpath(static_data_dir))
-
-    for root, dirnames, filenames in os.walk(static_data_dir):
-        for filename in fnmatch.filter(filenames, '*.sd'):
-            dir = os.path.relpath(root, static_data_dir)
-            sd_json_dir = os.path.join(args.outdir, "staticdata", dir)
-            if not os.path.exists(sd_json_dir):
-                os.makedirs(sd_json_dir)
-
-            sd_file_name = os.path.join(root, filename)
-            if args.patch is not None:
-                print("Looking for patch for file {}".format(filename))
-                hash_source = os.path.join("staticdata", dir, filename)
-
-                patch_file = patch_file_for_path(hash_source)
-
-                if patch_file is not None:
-                    print("Copying patch file {} to {}".format(
-                        patch_file, sd_file_name))
-                    # Copy the patched file over the original :)
-                    shutil.copy(patch_file, sd_file_name)
-
-            if which("fsd2json") is not None:
-                execute(["fsd2json", "-o", sd_json_dir, sd_file_name])
-            else:
-                execute(["cargo", "run", "--bin",
-                         "fsd2json", "--", "-o", sd_json_dir, sd_file_name])
-
+####
+# Transform Python Data
+####
 
 def transform_node(d):
     """
@@ -428,7 +453,7 @@ def extract_data_from_python(filename, directory, sub):
                 # Look for exprstmt with a name inside
                 # And use that if we find id
                 if expr.type == 'simple_stmt':
-                    # This 'ususally' works for extracting the contained ExprStmt
+                    # This 'usually' works for extracting the contained ExprStmt
                     # HACK HACK HACK
                     expr = expr.children[0]
 
@@ -482,7 +507,7 @@ def extract_data_from_python(filename, directory, sub):
             try:
                 lock.acquire()
                 if not os.path.exists(out_dir):
-                    os.makedirs(out_dir)
+                    os.makedirs(out_dir, exist_ok=True)
             finally:
                 lock.release()
 
@@ -519,30 +544,74 @@ def convert_files(root_dir, sub):
     lock = Lock()
     import multiprocessing
     pool = Pool(int(multiprocessing.cpu_count()),
-                initializer=init, initargs=(lock,patch_file_list,))
-    init(lock,patch_file_list,)
+                initializer=init, initargs=(lock,))
+    init(lock,)
     pool.map_async(extract_data_from_python_unpack, files).get(9999999)
 
+####
+# Main
+####
 
-with tempdir() as xapk_temp_dir:
+if __name__ == '__main__':
 
-    if args.patch is not None:
-        process_patch_files(args.patch)
+    if args.unpackdir is None and args.xapk is None and args.patch_game_files is not True:
+        print('You must give either an unpacked data directory, or an (X)APK containing all the assets.')
+    else:
+        with tempdir_if_required(args.gamedatadir) as game_data_dir:
+            with tempdir_if_required(args.unpackdir) as unpack_dir:
+                print('----------------------------')
+                print('Unpack Data:', unpack_dir)
+                print('Game Data:', game_data_dir)
+                print('Output Folder:', args.outdir)
+                print('----------------------------')
 
-    with zipfile.ZipFile(args.apk, 'r') as zip_ref:
-        zip_ref.extractall(xapk_temp_dir)
+                ## Parse Patch file listing (if it exists)
+                if args.patch is not None:
+                    process_patch_file_listing(args.patch)
 
-        for filename in os.listdir(xapk_temp_dir):
-            if filename.endswith(".apk"):
-                apk = os.path.join(xapk_temp_dir, filename)
-                dump_scripts(apk)
+                ## Unpack XAPK if required
+                if args.xapk is not None:
+                    with tempdir() as xapk_temp_dir:
+                        print('Unpacking XAPK:', xapk_temp_dir)
+                        with zipfile.ZipFile(args.xapk, 'r') as zip_ref:
+                            zip_ref.extractall(xapk_temp_dir)
+                            # Walk the files
+                            for root, dirnames, filenames in os.walk(xapk_temp_dir):
+                                for filename in filenames:
+                                    file_path = os.path.join(root, filename)
+                                    ## Unpack APK to (temp directory)
+                                    if filename.endswith(".apk"):
+                                        print('Unpacking APK files')
+                                        with zipfile.ZipFile(file_path) as apk_zip:
+                                            apk_zip.extractall(unpack_dir)
+                                    ## Unpack OBB to (temp directory)\assets
+                                    ## Depending on APK - this might already be in place
+                                    elif filename.endswith(".obb"):
+                                        print('Unpacking OBB files')
+                                        obb_unpack = os.path.join(unpack_dir, 'assets')
+                                        with zipfile.ZipFile(file_path) as obb_zip:
+                                            obb_zip.extractall(obb_unpack)
 
-        # Static Data stuff
-        dump_static_data_fsd(xapk_temp_dir)
+                ## Extract all NPK files to game_data folder
+                if args.patch_game_files is not True:
+                    print('Extracting game assets')
+                    dump_from_unpacked_data(unpack_dir, game_data_dir) 
+                    ## Copy OBB res/* to game_data folder
+                    print('Moving static data into game data...')
+                    static_data_src = os.path.join(unpack_dir, 'assets', 'res', 'staticdata')
+                    static_data_dest = os.path.join(game_data_dir, 'staticdata')
+                    shutil.copytree(static_data_src, static_data_dest, dirs_exist_ok=True)
+            
+                ## Copy patchfiles into game_data and rename            
+                if args.patch is not None:
+                    apply_patch_files(args.patch, game_data_dir)
 
-        # Script data to json
-        convert_files(os.path.join(args.outdir, "script", "data"), "data")
-        convert_files(os.path.join(args.outdir, "script",
-                                   "data_common"), "data_common")
+                ## Process all files in output 
+                print('Searching scripts...')
+                search_for_scripts(game_data_dir)
 
-# print(script_npk)
+                ## Convert Python data files
+                print('Converting Python data files...')
+                convert_files(os.path.join(args.outdir, "script", "data"), "data")
+                convert_files(os.path.join(args.outdir, "script",
+                                            "data_common"), "data_common")

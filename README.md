@@ -23,6 +23,15 @@ docker run -v$(pwd):/data cookiemagic/evee-tools dump_static /data/eve.xapk /dat
 ```
 
 > On windows adjust the Mount accordingly.
+> You can build the docker image on windows using PowerShell (in the root directory) with
+> ```
+> docker build -f docker/Dockerfile -t cookiemagic/evee-tools .
+> ```
+> To run it, you have to put the `$(pwd):/data` part in quotes when using PowerShell:
+> ```
+> docker run -v "$(pwd):/data" cookiemagic/evee-tools dump_static /data/eve.xapk /data/staticdata
+> ``` 
+
 
 Now you should have all the static data for Eve Echoes ready to use in `staticdata`. Enjoy.
 

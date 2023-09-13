@@ -20,7 +20,7 @@ COPY --from=cargo-build /usr/local/bin/fsd2json /usr/local/bin/fsd2json
 COPY --from=cargo-build /usr/local/bin/npktool /usr/local/bin/npktool
 
 RUN apk add --no-cache -X http://dl-cdn.alpinelinux.org/alpine/edge/testing git python3 py3-pip py3-mmh3 bash
-RUN pip install --no-cache-dir mmh3 xdis spark-parser parso
+RUN pip install --break-system-packages --no-cache-dir mmh3 xdis spark-parser parso
 
 RUN apk add --no-cache -X http://dl-cdn.alpinelinux.org/alpine/edge/testing libgcc
 ADD https://api.github.com/repos/xforce/eve-echoes-tools/compare/main...HEAD /dev/null

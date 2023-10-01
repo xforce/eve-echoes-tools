@@ -4,3 +4,4 @@
 .ccls-cache
 /data_dump/
 .DS_Store
+.idea/

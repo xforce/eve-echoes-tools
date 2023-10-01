@@ -1,0 +1,4 @@
+xdis==6.0.1 # Any older version will NOT work
+mmh3
+spark-parser
+parso

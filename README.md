@@ -36,6 +36,7 @@ cd eve-echoes-tools
 
 # Initialize (download) the submodules, if you want to install the other repos manually (because you want
 # to install it from a fork, ignore it and look into the section for installing forks
+# The section can be found in the INSTALLATION.md file
 git submodule update --init --recursive
 
 # Enter the neox-toolx/scripts folder

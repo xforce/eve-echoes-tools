@@ -1,4 +1,5 @@
-xdis==6.0.1 # Any older version will NOT work
+uncompyle6~=3.9.0
+xdis
 mmh3
 spark-parser
 parso

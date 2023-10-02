@@ -1,3 +1,6 @@
 [submodule "neox-tools"]
 	path = neox-tools
 	url = https://github.com/xforce/neox-tools.git
+[submodule "unnbk"]
+	path = neox-tools/scripts/unnbk
+	url = https://github.com/YJBeetle/unnpk.git

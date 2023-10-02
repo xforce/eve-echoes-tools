@@ -8,11 +8,21 @@ Eve Echoes Tools
 
 A collection of tools to convert, extract and modify the game files of Eve Echoes.
 
-<br>
 
-## Installation
+This project is only partially maintained and has experienced some breaking changes in the dependencies. You can find
+a list of the latest tested and working dependency version at the end of [INSTALLATION.md](INSTALLATION.md). There is
+also a `requirements-lock.txt` file that contains the exact package versions.
 
-Only a few tools in this repo can be installed on your machine, this is generally intended to be run in a clone.</br>
+The Docker installation is currently broken, if you still want to use docker, you have to fix it.
+
+## Docker Installation
+
+The detailed instructions for a manual installations can be found in .
+
+> The docker script is currently broken because the installation requires some hacky solutions. Please install it
+> manually
+
+~~Only a few tools in this repo can be installed on your machine, this is generally intended to be run in a clone.~~</br>
 The primary use-case of this for now is to dump all the static data of Eve Echoes into JSON files.
 
 The easiest way this can be done is by using the docker image which has all the required tools installed.</br>
@@ -47,10 +57,12 @@ Simple tools to interact with the engine files of NeoX as used in Eve Echoes and
 
 ## Installing
 
-All you have to do to build it is clone it an run on of the following:
+> This section does probably also no longer work, please refer to the manual installation page.
+
+All you have to do to build it is clone it and run on of the following:
 
 ```
-cargo install --path <path to tool>
+cargo install --path {path to tool}
 ```
 
-> <Path to tool> to be replaced by one of the directories in this repo.
+> {path to tool} to be replaced by one of the directories in this repo.

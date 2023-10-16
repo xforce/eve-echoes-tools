@@ -1,0 +1,8 @@
+uncompyle6==3.9.0
+xdis==6.0.5
+mmh3==4.0.1
+spark-parser==1.8.9
+parso==0.8.3
+## The following requirements were added by pip freeze:
+click==8.1.7
+six==1.16.0

@@ -1,0 +1,5 @@
+uncompyle6~=3.9.0
+xdis
+mmh3
+spark-parser
+parso

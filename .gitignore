@@ -1,6 +1,19 @@
+# IDE files
 /target
+.ccls-cache
+.DS_Store
+.idea/
+
+# Data files
 /staticdata
 /xapk
-.ccls-cache
 /data_dump/
-.DS_Store
+*.xapk
+
+# Python venv files
+lib
+lib64
+include/
+bin/
+pyvenv.cfg
+

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import tarfile
 from typing import Dict, Tuple, List
 
 import mmh3
@@ -83,6 +84,10 @@ parser = argparse.ArgumentParser(
     description='Dump all the static data out of the Eve Echoes XAPK')
 parser.add_argument('--xapk', type=str, action='store',
                     help="XAPK File to extract static data from")
+parser.add_argument('--tar', type=str, action="store",
+                    help="TAR File to extract static data from")
+parser.add_argument('--auto', action="store_true",
+                    help="Detect the file type (xapk/tar) from the file name")
 parser.add_argument('outdir', type=str, action='store',
                     help="Target directory to extract the static data to")
 
@@ -595,8 +600,8 @@ def convert_files(root_dir, sub):
 ####
 
 if __name__ == '__main__':
-    if args.unpackdir is None and args.xapk is None and args.patch_game_files is not True:
-        print('You must give either an unpacked data directory, or an (X)APK containing all the assets.')
+    if args.unpackdir is None and args.xapk is None and args.tar is None and args.patch_game_files is not True:
+        print('You must give either an unpacked data directory, or an (X)APK/TAR containing all the assets.')
         exit(1)
 
     if args.no_script or NO_SCRIPT:
@@ -616,30 +621,43 @@ if __name__ == '__main__':
             ## Parse Patch file listing (if it exists)
             if args.patch is not None:
                 process_patch_file_listing(args.patch)
-
+            if args.auto:
+                archive_path = args.xapk or args.tar
+                if archive_path.endswith("apk"):
+                    archive_class = zipfile.ZipFile
+                elif archive_path.endswith(".tar"):
+                    archive_class = tarfile.TarFile
+                else:
+                    print(f"Could not detect archive format for file {archive_path}, using zip")
+                    archive_class = zipfile.ZipFile
+            else:
+                archive_path = args.xapk or args.tar
+                archive_class = zipfile.ZipFile if args.xapk else tarfile.TarFile
             ## Unpack XAPK if required
-            if args.xapk is not None:
-                if not os.path.exists(args.xapk):
-                    error(f"Path to XAPK not found: {args.xapk}")
+            if archive_path is not None:
+                print(f"Using extractor: {archive_class.__name__}")
+                if not os.path.exists(archive_path):
+                    error(f"Path to XAPK/TAR not found: {archive_path}")
                     exit(1)
                 with tempdir() as xapk_temp_dir:
-                    print('Unpacking XAPK:', xapk_temp_dir)
-                    with zipfile.ZipFile(args.xapk, 'r') as zip_ref:
-                        zip_ref.extractall(xapk_temp_dir)
+                    print('Unpacking XAPK/TAR into', xapk_temp_dir)
+                    with archive_class(archive_path, 'r') as archive_ref:
+                        print(f"Extracting from {archive_path}")
+                        archive_ref.extractall(xapk_temp_dir)
                         # Walk the files
                         for root, dirnames, filenames in os.walk(xapk_temp_dir):
                             for filename in filenames:
                                 file_path = os.path.join(root, filename)
+                                obb_unpack = os.path.join(unpack_dir, 'assets')
                                 ## Unpack APK to (temp directory)
                                 if filename.endswith(".apk"):
-                                    print('Unpacking APK files')
+                                    print(f'Unpacking APK files from {file_path}')
                                     with zipfile.ZipFile(file_path) as apk_zip:
                                         apk_zip.extractall(unpack_dir)
                                 ## Unpack OBB to (temp directory)\assets
                                 ## Depending on APK - this might already be in place
                                 elif filename.endswith(".obb"):
-                                    print('Unpacking OBB files')
-                                    obb_unpack = os.path.join(unpack_dir, 'assets')
+                                    print(f'Unpacking OBB files from {file_path}')
                                     with zipfile.ZipFile(file_path) as obb_zip:
                                         obb_zip.extractall(obb_unpack)
 

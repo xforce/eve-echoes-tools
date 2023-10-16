@@ -60,9 +60,9 @@ case "$subcommand" in
     pushd /opt/eve-echoes-tools
     if [ -z "$patch_path" ]
     then 
-        python3 scripts/dump_static_data.py --xapk $xapk_path $out_dir
+        python3 scripts/dump_static_data.py --xapk $xapk_path $out_dir  --auto
     else
-        python3 scripts/dump_static_data.py -p $patch_path --xapk $xapk_path $out_dir
+        python3 scripts/dump_static_data.py -p $patch_path --xapk $xapk_path $out_dir --auto
     fi
     popd
 

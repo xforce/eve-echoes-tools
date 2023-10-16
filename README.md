@@ -65,14 +65,22 @@ This command will extract all data into the staticdata directory. It will only s
 use all raw data (to e.g. extract images and other assets), please refer to the manual installation page. The container
 will only save the json and script data.
 
-```
+```shell
+# When extraction from eve.xapk:
 docker run -v$(pwd):/data cookiemagic/evee-tools dump_static /data/eve.xapk /data/staticdata
+
+# When extraction from eve.tar:
+docker run -v$(pwd):/data cookiemagic/evee-tools dump_static /data/eve.tar /data/staticdata
 ```
 
 > On windows adjust the Mount accordingly.
 > To run it, you have to put the `$(pwd):/data` part in quotes when using PowerShell:
-> ```
+> ```shell
+> # When extraction from eve.xapk:
 > docker run -v "$(pwd):/data" cookiemagic/evee-tools dump_static /data/eve.xapk /data/staticdata
+> 
+> # When extraction from eve.tar:
+> docker run -v "$(pwd):/data" cookiemagic/evee-tools dump_static /data/eve.tar /data/staticdata
 > ``` 
 
 
@@ -99,3 +107,37 @@ cargo install --path {path to tool}
 ```
 
 > {path to tool} to be replaced by one of the directories in this repo.
+
+
+## Getting the APK
+The tool does support both extracting from an (x)apk and from a .tar archive. The xapk is required to obtain the full 
+data. The easiest way to obtain the most recent data is to back them up from an android device/emulator.
+
+### Prerequisites
+An Android device with USB debugging enabled ([link](https://developer.android.com/studio/debug/dev-options)) or an
+emulator with ADB (Android Debug Bridge) enabled. If you use Bluestacks, start the instance and enable ADB in the
+"Advanced" section of the settings.
+
+You will need these tools:
+- [Android Platform Tools](https://developer.android.com/tools/releases/platform-tools#downloads)
+- [Android Backup Extractor](https://github.com/nelenkov/android-backup-extractor)
+- Java Runtime Environment
+
+### Create Backup
+Connect you device to ADB, when using an emulator look up the Host/Port in the settings and run e.g.
+```shell
+adb connect 127.0.0.1:63000
+```
+After you have connected your device, you can start the backup. You will have to confirm the backup on your device.
+```shell
+adb backup -f backup.ab -apk -obb com.netease.eve.en
+```
+
+This will create a backup named `backup.ab`. Take this file and run the `.jar` from android-backup-extractor:
+```shell
+# Both the abe.jar and the backup.ab have to be in the same directory
+java -jar abe.jar unpack backup.ab eve.tar
+```
+The generated `.tar` can be used for this tool to extract data from instead of an `.xapk`.
+
+
